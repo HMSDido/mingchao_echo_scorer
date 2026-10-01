@@ -10,6 +10,17 @@
 - 技术栈：Flutter 3.47 / Dart 3.13
 - 仓库：<https://github.com/HMSDido/mingchao_echo_scorer>
 
+## 下载
+
+安装包发布在 **[Releases](https://github.com/HMSDido/mingchao_echo_scorer/releases)** 页面，
+校验和写在每条 Release 的说明里：
+
+- **Android**：`mingchao_echo_scorer-<版本>-android-arm64-v8a.apk`（仅打包 arm64-v8a，
+  覆盖绝大多数手机；需要 armeabi-v7a / x86_64 请开 Issue）
+- **Windows x64**：`mingchao_echo_scorer-<版本>-windows-x64.zip`，解压后运行
+  `mingchao_echo_scorer.exe`。exe 未做代码签名，SmartScreen 可能拦截，
+  选「更多信息 → 仍要运行」。
+
 ---
 
 ## 目录
