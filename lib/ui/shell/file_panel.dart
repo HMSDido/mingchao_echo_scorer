@@ -128,7 +128,11 @@ class _FileTile extends StatelessWidget {
     final theme = Theme.of(context);
     final active = workspace.isActive(file);
     final dirty = workspace.isDirty(file);
-    final score = ScoreCalculator.scoreFile(file.echoes, file.coefficients);
+    final score = ScoreCalculator.scoreFile(
+      file.echoes,
+      file.coefficients,
+      critThreshold: file.critThreshold,
+    );
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),

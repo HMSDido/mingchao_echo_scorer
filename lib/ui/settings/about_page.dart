@@ -72,6 +72,13 @@ class AboutPage extends StatelessWidget {
                   text: '总分 = 5 件声骸的当前分数之和。',
                 ),
                 _Line(
+                  icon: Icons.speed_outlined,
+                  text:
+                      '暴击阈值（选填）：在总览页填入 XX.X% 后，5 件声骸的暴击率合计'
+                      '超过该值时，超出部分不再计入总分，并在总览页提醒；'
+                      '不填则不设阈值，正常输出评分。',
+                ),
+                _Line(
                   icon: Icons.workspace_premium_outlined,
                   text:
                       '单件理论最高分 = 13 项「系数 × 该属性最高档位数值」中最大的 5 项之和；'

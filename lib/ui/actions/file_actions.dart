@@ -57,7 +57,11 @@ class FileActions {
       items: candidates,
       labelBuilder: (file) => file.name,
       subtitleBuilder: (file) {
-        final score = ScoreCalculator.scoreFile(file.echoes, file.coefficients);
+        final score = ScoreCalculator.scoreFile(
+          file.echoes,
+          file.coefficients,
+          critThreshold: file.critThreshold,
+        );
         final profile = file.hasProfile ? file.profileName : '未选择角色';
         return '${Format.scoreWithUnit(score.totalScore)} · $profile · '
             '${Format.dateTime(file.updatedAt)}';

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/palette.dart';
 import '../../core/util/format.dart';
+import '../../data/catalog/substat_type.dart';
 import '../../data/models/echo_entry.dart';
 import '../../data/models/score_file.dart';
 import '../../domain/score_calculator.dart';
@@ -23,7 +25,11 @@ class OverviewPage extends StatelessWidget {
     final file = workspace.activeFile;
     if (file == null) return const _NoFileView();
 
-    final score = ScoreCalculator.scoreFile(file.echoes, file.coefficients);
+    final score = ScoreCalculator.scoreFile(
+      file.echoes,
+      file.coefficients,
+      critThreshold: file.critThreshold,
+    );
 
     return Center(
       child: ConstrainedBox(
@@ -34,6 +40,12 @@ class OverviewPage extends StatelessWidget {
             if (!file.hasProfile) _ProfilePrompt(file: file),
             if (file.hasProfile) ...[
               _TotalScore(file: file, score: score),
+              const SizedBox(height: 18),
+              _CritPanel(
+                key: ValueKey('crit-panel-${file.id}'),
+                file: file,
+                score: score,
+              ),
               const SizedBox(height: 18),
             ],
             for (var slot = 0; slot < EchoEntry.slotCount; slot++) ...[
@@ -227,6 +239,163 @@ class _TotalScore extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Center(child: RatingChip(rating: score.totalRating, fontSize: 15)),
+      ],
+    );
+  }
+}
+
+/// 副词条合计 + 暴击率阈值面板。
+///
+/// 合计是 5 件声骸各属性档位数值之和（派生输出）；阈值是选填输入，随文件落盘，
+/// 合计超出阈值时顶部给出提醒，且超出部分已在总分里扣除。
+class _CritPanel extends StatefulWidget {
+  const _CritPanel({super.key, required this.file, required this.score});
+
+  final ScoreFile file;
+  final FileScore score;
+
+  @override
+  State<_CritPanel> createState() => _CritPanelState();
+}
+
+class _CritPanelState extends State<_CritPanel> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.file.critThreshold?.toStringAsFixed(1) ?? '',
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String text) {
+    final workspace = context.read<WorkspaceController>();
+    final cleaned = text.replaceAll('%', '').trim();
+    if (cleaned.isEmpty) {
+      if (widget.file.critThreshold != null) {
+        workspace.updateFile(widget.file.copyWith(clearCritThreshold: true));
+      }
+      return;
+    }
+    final parsed = double.tryParse(cleaned);
+    if (parsed == null || !parsed.isFinite || parsed < 0) return;
+    if (widget.file.critThreshold != parsed) {
+      workspace.updateFile(widget.file.copyWith(critThreshold: parsed));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final score = widget.score;
+    final filled = SubstatType.values
+        .where((type) => score.substatTotals[type]! > 0)
+        .toList(growable: false);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (score.hasCritOverflow) ...[
+          Card(
+            color: theme.colorScheme.errorContainer,
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    color: theme.colorScheme.onErrorContainer,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '暴击率合计 ${SubstatType.critRate.displaySumOf(score.critSum)}'
+                      ' 已超过阈值 '
+                      '${SubstatType.critRate.displaySumOf(score.critThreshold!)}，'
+                      '超出的 '
+                      '${SubstatType.critRate.displaySumOf(score.critExcess)}'
+                      ' 不计入总分。',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onErrorContainer,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        Card(
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('副词条合计（5 件声骸）', style: theme.textTheme.titleSmall),
+                const SizedBox(height: 8),
+                if (filled.isEmpty)
+                  Text(
+                    '还没有录入任何词条。',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.outline,
+                    ),
+                  )
+                else
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final type in filled)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '${type.label} '
+                            '${type.displaySumOf(score.substatTotals[type]!)}',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                    ],
+                  ),
+                const SizedBox(height: 14),
+                TextField(
+                  key: const ValueKey('crit-threshold'),
+                  controller: _controller,
+                  onChanged: _onChanged,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.%]')),
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: '当前角色暴击阈值（选填）',
+                    hintText: 'XX.X%',
+                    suffixText: '%',
+                    helperText: '暴击率合计超过该值时，超出部分不计入总分',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }

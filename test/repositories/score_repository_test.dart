@@ -222,6 +222,29 @@ void main() {
     expect(Directory(p.join(tempRoot.path, '逃逸')).existsSync(), isFalse);
   });
 
+  test('暴击阈值随文件落盘，缺键或非法值视为不设阈值', () async {
+    final saved = await repository.save(
+      sample('阈值').copyWith(critThreshold: 25.0),
+    );
+    final loaded = (await repository.loadAll()).items.single;
+    expect(loaded.critThreshold, 25.0);
+    expect(loaded.sameContentAs(saved), isTrue);
+
+    final raw = File(p.join(repository.folderOf(saved).path, 'score.json'));
+    final json = jsonDecode(await raw.readAsString()) as Map<String, dynamic>;
+    expect(json['critThreshold'], 25.0);
+
+    json.remove('critThreshold');
+    await raw.writeAsString(jsonEncode(json));
+    final reloaded = (await repository.loadAll()).items.single;
+    expect(reloaded.critThreshold, isNull);
+    expect(reloaded.sameContentAs(loaded), isFalse);
+
+    json['critThreshold'] = -3;
+    await raw.writeAsString(jsonEncode(json));
+    expect((await repository.loadAll()).items.single.critThreshold, isNull);
+  });
+
   test('写入不残留临时文件', () async {
     final saved = await repository.save(sample('原子性'));
     await repository.save(saved);

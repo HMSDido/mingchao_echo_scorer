@@ -186,6 +186,94 @@ void main() {
     });
   });
 
+  group('副词条合计与暴击阈值', () {
+    final twoCritEchoes = [
+      echo(0, {SubstatType.critRate: 8}), // 10.5
+      echo(1, {SubstatType.critRate: 8}), // 10.5
+      echo(2, {}),
+      echo(3, {}),
+      echo(4, {}),
+    ];
+
+    test('合计为 5 件声骸各属性档位数值之和', () {
+      final echoes = [
+        echo(0, {SubstatType.critRate: 3, SubstatType.flatAtk: 2}), // 7.5 / 40
+        echo(1, {SubstatType.critRate: 5, SubstatType.flatAtk: 2}), // 8.7 / 40
+        echo(2, {}),
+        echo(3, {}),
+        echo(4, {}),
+      ];
+      final totals = ScoreCalculator.substatTotals(echoes);
+      expect(totals[SubstatType.critRate], closeTo(16.2, 1e-9));
+      expect(totals[SubstatType.flatAtk], 80.0);
+      expect(totals[SubstatType.critDmg], 0.0);
+    });
+
+    test('超填的声骸不计入合计', () {
+      final echoes = [
+        echo(0, {
+          SubstatType.critRate: 1,
+          SubstatType.critDmg: 1,
+          SubstatType.atkPct: 1,
+          SubstatType.hpPct: 1,
+          SubstatType.defPct: 1,
+          SubstatType.energyRegen: 1,
+        }),
+        echo(1, {SubstatType.critRate: 2}), // 6.9
+        echo(2, {}),
+        echo(3, {}),
+        echo(4, {}),
+      ];
+      final totals = ScoreCalculator.substatTotals(echoes);
+      expect(totals[SubstatType.critRate], closeTo(6.9, 1e-9));
+    });
+
+    test('未设阈值时合计不影响总分', () {
+      final file = ScoreCalculator.scoreFile(twoCritEchoes, critOnly);
+      expect(file.critSum, closeTo(21.0, 1e-9));
+      expect(file.critExcess, 0.0);
+      expect(file.hasCritOverflow, isFalse);
+      expect(file.totalScore, closeTo(21.0, 1e-9));
+      expect(file.totalRating, Rating.c); // 21 / 52.5 = 40% 恰为 C 级门槛
+    });
+
+    test('合计未超过阈值时不截断', () {
+      final file = ScoreCalculator.scoreFile(
+        twoCritEchoes,
+        critOnly,
+        critThreshold: 25.0,
+      );
+      expect(file.critExcess, 0.0);
+      expect(file.hasCritOverflow, isFalse);
+      expect(file.totalScore, closeTo(21.0, 1e-9));
+    });
+
+    test('超出阈值的部分按暴击率系数从总分中扣除', () {
+      final file = ScoreCalculator.scoreFile(
+        twoCritEchoes,
+        critOnly,
+        critThreshold: 15.0,
+      );
+      // 合计 21.0、超出 6.0、暴击率系数 1.0 → 21.0 − 6.0 = 15.0
+      expect(file.critExcess, closeTo(6.0, 1e-9));
+      expect(file.hasCritOverflow, isTrue);
+      expect(file.totalScore, closeTo(15.0, 1e-9));
+      // 评级跟随截断后的总分：15 / 52.5 ≈ 28.6% → 无评级
+      expect(file.totalRating, Rating.none);
+    });
+
+    test('扣除量随暴击率系数缩放', () {
+      final halfCrit = normalizeCoefficients({SubstatType.critRate: 0.5});
+      final file = ScoreCalculator.scoreFile(
+        twoCritEchoes,
+        halfCrit,
+        critThreshold: 15.0,
+      );
+      // 每件 5.25、总分 10.5；超出 6.0 × 0.5 = 3.0 → 7.5
+      expect(file.totalScore, closeTo(7.5, 1e-9));
+    });
+  });
+
   group('系数规范化', () {
     test('缺失键补 0、负值与 NaN 夹到 0', () {
       final normalized = normalizeCoefficients({

@@ -18,6 +18,7 @@ class ScoreFile {
     required this.coefficients,
     required this.echoes,
     required this.updatedAt,
+    this.critThreshold,
   });
 
   /// 新建评分文件并套用 [profile] 的系数快照。
@@ -69,6 +70,12 @@ class ScoreFile {
 
   final DateTime updatedAt;
 
+  /// 暴击率阈值（百分比数值，如 `25.0` 表示 25.0%），null 表示不设阈值。
+  ///
+  /// 设了阈值后，5 件声骸的暴击率合计超出该值的部分不再计入总分，
+  /// 具体口径见 `ScoreCalculator.scoreFile`。
+  final double? critThreshold;
+
   bool get hasProfile => profileId.isNotEmpty;
 
   EchoEntry echoAt(int slot) => echoes[slot];
@@ -80,6 +87,8 @@ class ScoreFile {
     Coefficients? coefficients,
     List<EchoEntry>? echoes,
     DateTime? updatedAt,
+    double? critThreshold,
+    bool clearCritThreshold = false,
   }) => ScoreFile(
     id: id,
     name: name ?? this.name,
@@ -90,6 +99,9 @@ class ScoreFile {
         : normalizeCoefficients(coefficients),
     echoes: echoes ?? this.echoes,
     updatedAt: updatedAt ?? this.updatedAt,
+    critThreshold: clearCritThreshold
+        ? null
+        : (critThreshold ?? this.critThreshold),
   );
 
   /// 替换指定槽位的声骸数据（详情页「保存本声骸」走这里）。
@@ -124,7 +136,7 @@ class ScoreFile {
     for (var i = 0; i < echoes.length; i++) {
       if (!echoes[i].sameContentAs(other.echoes[i])) return false;
     }
-    return true;
+    return _sameOptionalDouble(critThreshold, other.critThreshold);
   }
 
   Map<String, dynamic> toJson() => {
@@ -135,6 +147,7 @@ class ScoreFile {
     'coefficients': coefficientsToJson(coefficients),
     'echoes': echoes.map((echo) => echo.toJson()).toList(),
     'updatedAt': isoDate(updatedAt),
+    if (critThreshold != null) 'critThreshold': critThreshold,
   };
 
   static ScoreFile fromJson(Map<String, dynamic> json) {
@@ -180,6 +193,18 @@ class ScoreFile {
       coefficients: coefficientsFromJson(json['coefficients']),
       echoes: echoes,
       updatedAt: parseDate(json['updatedAt'], now),
+      critThreshold: _thresholdFromJson(json['critThreshold']),
     );
   }
+}
+
+/// 阈值是选填项：缺失、非数字或负数一律视为「不设阈值」。
+double? _thresholdFromJson(Object? raw) =>
+    raw is num && raw >= 0 ? raw.toDouble() : null;
+
+/// NaN 与自身不相等，直接 `==` 会让含 NaN 的阈值永远判定为「已改动」。
+bool _sameOptionalDouble(double? a, double? b) {
+  if (a == null || b == null) return a == null && b == null;
+  if (a.isNaN && b.isNaN) return true;
+  return (a - b).abs() < 1e-9;
 }

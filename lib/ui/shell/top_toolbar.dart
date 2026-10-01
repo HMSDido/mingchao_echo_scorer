@@ -143,7 +143,11 @@ class _FileStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final score = ScoreCalculator.scoreFile(file.echoes, file.coefficients);
+    final score = ScoreCalculator.scoreFile(
+      file.echoes,
+      file.coefficients,
+      critThreshold: file.critThreshold,
+    );
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [

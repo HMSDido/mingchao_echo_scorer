@@ -141,6 +141,11 @@ enum SubstatType {
         : value.toStringAsFixed(0);
   }
 
+  /// 多件声骸合计值的显示文本：百分比属性保留 1 位小数并带 `%`，固定值取整。
+  String displaySumOf(double value) => unit == SubstatUnit.percent
+      ? '${value.toStringAsFixed(1)}%'
+      : value.toStringAsFixed(0);
+
   /// JSON 序列化用的稳定键名（英文，不随中文名变动）。
   String get jsonKey => name;
 

@@ -88,6 +88,54 @@ void main() {
     }
   });
 
+  testWidgets('总览页输出副词条合计，暴击阈值超出部分不计入总分', (tester) async {
+    await _pumpApp(tester);
+    await _seedScoredFile(tester);
+
+    final harness = _current!;
+    final file = harness.workspace.activeFile!;
+    harness.workspace.updateEcho(
+      file.id,
+      file
+          .echoAt(0)
+          .withTier(SubstatType.critRate, 3) // 7.5
+          .withTier(SubstatType.critDmg, 8), // 21.0
+    );
+    harness.workspace.updateEcho(
+      file.id,
+      file.echoAt(1).withTier(SubstatType.critRate, 5), // 8.7
+    );
+    await tester.pumpAndSettle();
+
+    // 合计：暴击率 7.5 + 8.7 = 16.2%，暴伤 21.0%。
+    expect(find.text('暴击率 16.2%'), findsOneWidget);
+    expect(find.text('暴击伤害 21.0%'), findsOneWidget);
+    expect(find.text('攻击% 0.0%'), findsNothing);
+    // 总分 = 7.5 + 21.0 + 8.7 = 37.20
+    expect(_plainText(tester, 'total-score'), '37.20分 无评级');
+
+    await tester.enterText(
+      find.byKey(const ValueKey('crit-threshold')),
+      '10.0',
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('暴击率合计 16.2% 已超过阈值 10.0%'), findsOneWidget);
+    expect(find.textContaining('超出的 6.2% 不计入总分'), findsOneWidget);
+    // 37.2 − 6.2 × 1.0 = 31.0；单件声骸的评分不受阈值影响。
+    expect(_plainText(tester, 'total-score'), '31.00分 无评级');
+    expect(_plainText(tester, 'echo-score-0'), '28.50分 C级');
+    expect(_plainText(tester, 'echo-score-1'), '8.70分 无评级');
+    expect(harness.workspace.activeFile!.critThreshold, 10.0);
+
+    // 清空阈值后恢复不设限的正常总分。
+    await tester.enterText(find.byKey(const ValueKey('crit-threshold')), '');
+    await tester.pumpAndSettle();
+    expect(find.textContaining('已超过阈值'), findsNothing);
+    expect(_plainText(tester, 'total-score'), '37.20分 无评级');
+    expect(harness.workspace.activeFile!.critThreshold, isNull);
+  });
+
   testWidgets('详情页实时输出当前评分与预期最高分', (tester) async {
     await _pumpApp(tester);
     await _seedScoredFile(tester);

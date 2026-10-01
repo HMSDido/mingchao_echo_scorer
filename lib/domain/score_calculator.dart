@@ -41,9 +41,13 @@ class FileScore {
     required this.totalMaxScore,
     required this.totalRating,
     required this.echoes,
+    required this.substatTotals,
+    required this.critSum,
+    required this.critThreshold,
+    required this.critExcess,
   });
 
-  /// 5 件声骸显示分之和（2 位小数）。
+  /// 5 件声骸显示分之和（2 位小数），已扣除暴击率超出阈值的部分。
   final double totalScore;
 
   /// 总理论最高分 = 5 × 单件理论最高分。
@@ -53,7 +57,22 @@ class FileScore {
 
   final List<EchoScore> echoes;
 
+  /// 各属性在 5 件声骸上的档位数值合计（超填的声骸不计入）。
+  final Map<SubstatType, double> substatTotals;
+
+  /// 暴击率合计（百分比数值）。
+  final double critSum;
+
+  /// 用户设置的暴击率阈值；null 表示不设阈值。
+  final double? critThreshold;
+
+  /// 暴击率合计超出阈值的部分；未设阈值或未超出时为 0。
+  final double critExcess;
+
   double get ratio => totalMaxScore <= 0 ? 0.0 : totalScore / totalMaxScore;
+
+  /// 暴击率合计已超出阈值，超出部分未计入 [totalScore]。
+  bool get hasCritOverflow => critThreshold != null && critExcess > 1e-9;
 }
 
 /// 评分与评级计算。
@@ -64,7 +83,9 @@ class FileScore {
 ///   **不是**档位序号；
 /// * 评级比值使用「已取整的显示分 / 理论最高分」，保证界面上的分数与评级自洽；
 /// * 单件理论最高分 = 13 项 `系数 × 该属性最高档位数值` 降序取前 5 之和；
-/// * 总理论最高分 = 5 × 单件理论最高分。
+/// * 总理论最高分 = 5 × 单件理论最高分；
+/// * 暴击率阈值（选填）：5 件声骸的暴击率合计超出阈值的部分不计入总分，
+///   即总分在 5 件之和的基础上再减去 `超出量 × 暴击率系数`。
 class ScoreCalculator {
   const ScoreCalculator._();
 
@@ -135,14 +156,38 @@ class ScoreCalculator {
     );
   }
 
+  /// 各属性在 5 件声骸上的档位数值合计。
+  ///
+  /// 超填（>5 条）的声骸本来就不计入总分，其词条也不进合计，保持同一口径。
+  static Map<SubstatType, double> substatTotals(List<EchoEntry> echoes) {
+    final totals = {for (final type in SubstatType.values) type: 0.0};
+    for (final echo in echoes) {
+      if (echo.isOverFilled) continue;
+      echo.tiers.forEach((type, tier) {
+        if (tier <= 0) return;
+        totals[type] = totals[type]! + type.valueAt(tier);
+      });
+    }
+    return totals;
+  }
+
   static FileScore scoreFile(
     List<EchoEntry> echoes,
-    Coefficients coefficients,
-  ) {
+    Coefficients coefficients, {
+    double? critThreshold,
+  }) {
     final scores = echoes
         .map((echo) => scoreEcho(echo, coefficients))
         .toList(growable: false);
-    final total = roundTo2(scores.fold(0.0, (sum, item) => sum + item.score));
+    final totals = substatTotals(echoes);
+    final critSum = totals[SubstatType.critRate]!;
+    final excess = critThreshold == null || critSum <= critThreshold
+        ? 0.0
+        : critSum - critThreshold;
+    final total = roundTo2(
+      scores.fold(0.0, (sum, item) => sum + item.score) -
+          excess * coefficients[SubstatType.critRate]!,
+    );
     final totalMax = roundTo2(
       scores.isEmpty ? 0.0 : scores.first.maxScore * EchoEntry.slotCount,
     );
@@ -151,6 +196,10 @@ class ScoreCalculator {
       totalMaxScore: totalMax,
       totalRating: Rating.fromScore(total, totalMax),
       echoes: scores,
+      substatTotals: totals,
+      critSum: critSum,
+      critThreshold: critThreshold,
+      critExcess: excess,
     );
   }
 }
