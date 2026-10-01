@@ -25,7 +25,9 @@ jobs:
 
       - name: 列出本次新增的配置文件
         run: |
-          git diff --name-only --diff-filter=A \
+          # core.quotepath=off：否则 git 会把中文路径转义成 "\345\205\261..." 形式，
+          # 下一步就会拿这个假路径去开文件，把每份正常配置都误报成解析失败。
+          git -c core.quotepath=off diff --name-only --diff-filter=A \
             "origin/${{ github.base_ref }}"...HEAD \
             -- '共享角色系数配置文件/' | grep '\.json$' > added.txt || true
           echo "count=$(wc -l < added.txt)"
@@ -35,7 +37,7 @@ jobs:
         id: check
         run: |
           status=0
-          failed=""
+          : > failed.md
           while IFS= read -r file; do
             [ -z "$file" ] && continue
             if python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8-sig"))' "$file"; then
@@ -43,11 +45,18 @@ jobs:
             else
               echo "FAIL $file"
               status=1
-              failed="$failed\n- \`$file\`"
+              printf -- '- `%s`\n' "$file" >> failed.md
             fi
           done < added.txt
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          printf 'failed=%b\n' "$failed" >> "$GITHUB_OUTPUT"
+          # GITHUB_OUTPUT 按行解析 `name=value`，多行值必须用 heredoc 形式写出，
+          # 否则从第二个失败文件开始的内容都会被丢掉。
+          {
+            echo "status=$status"
+            echo "failed<<FEOF"
+            cat failed.md
+            echo "FEOF"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
 
       - name: 解析失败时打标签并留言
         if: steps.check.outputs.status == '1'
@@ -79,35 +88,50 @@ jobs:
       contains(github.event.issue.labels.*.name, 'community-preset')
     runs-on: ubuntu-latest
     steps:
-      - name: 从 Issue 正文中提取粘贴的 JSON
-        id: extract
+      - name: 提取并校验正文中的 JSON
+        id: check
         env:
           BODY: ${{ github.event.issue.body }}
         run: |
-          python3 - <<'PY' > extracted.txt
-          import os, re
+          python3 <<'PY' >> "$GITHUB_OUTPUT"
+          import os, re, json
           body = os.environ.get('BODY', '')
-          blocks = re.findall(r'```(?:json)?\s*(\{.*?\})\s*```', body, re.S)
+          # 优先取 ``` 围栏里的内容。
+          blocks = re.findall(r'```[a-zA-Z]*\s*(.*?)```', body, re.S)
           if not blocks:
-              blocks = re.findall(r'(\{(?:[^{}]|\{[^{}]*\})*\})', body, re.S)
-          print('\n'.join(b.strip() for b in blocks if b.strip()))
+              # 没有围栏时，只把「行首就是 {」的段落当候选，避免把说明文字里
+              # 随手写的 {大概 2.15} 误判成一份非法的 JSON。
+              m = re.search(r'(?m)^\s*\{', body)
+              blocks = [body[m.start():]] if m else []
+          found = valid = 0
+          for b in blocks:
+              start = b.find('{')
+              if start < 0:
+                  continue
+              # 必须做括号配对计数：角色系数 JSON 里嵌套了 coefficients 对象，
+              # 用 .*? 这类非贪婪正则会截断到内层第一个 } 而误判成非法 JSON。
+              depth = 0
+              for i, ch in enumerate(b[start:], start):
+                  if ch == '{':
+                      depth += 1
+                  elif ch == '}':
+                      depth -= 1
+                      if depth == 0:
+                          cand = b[start:i + 1]
+                          # JSON 的键必然带双引号；没有引号就不是一开始找的东西。
+                          if '"' in cand:
+                              found += 1
+                              try:
+                                  json.loads(cand)
+                                  valid += 1
+                              except Exception:
+                                  pass
+                          break
+          status = 'valid' if valid else ('invalid' if found else 'none')
+          print(f'found={found}')
+          print(f'valid={valid}')
+          print(f'status={status}')
           PY
-          count=$(grep -c . extracted.txt || true)
-          echo "count=$count" >> "$GITHUB_OUTPUT"
-
-      - name: 检查粘贴的 JSON 是否可解析
-        if: steps.extract.outputs.count != '0'
-        id: check
-        run: |
-          status=invalid
-          while IFS= read -r block; do
-            [ -z "$block" ] && continue
-            if printf '%s' "$block" | python3 -c 'import json,sys; json.load(sys.stdin)'; then
-              status=valid
-              break
-            fi
-          done < extracted.txt
-          echo "status=$status" >> "$GITHUB_OUTPUT"
 
       - name: 解析失败时打标签并留言
         if: steps.check.outputs.status == 'invalid'
@@ -119,8 +143,8 @@ jobs:
           gh issue comment "$ISSUE" --body "$(cat <<'EOF'
           ### 粘贴的 JSON 无法解析
 
-          机器人没能把内容读成合法 JSON。请用应用「导出为 JSON」生成的原始内容整段粘贴，
-          或直接把文件拖进 Issue 作为附件上传。
+          机器人没能把内容读成合法 JSON。请用应用「导出为 JSON」生成的原始内容整段粘贴
+          （建议包在三枚反引号的代码块里），或直接把 `.json` 文件拖进 Issue 作为附件上传。
           本检查**只验证 JSON 格式是否合法**，不涉及系数取值，最终权重由维护者人工审阅。
           EOF
           )"
