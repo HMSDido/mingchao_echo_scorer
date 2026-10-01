@@ -1,0 +1,126 @@
+name: 校验社区配置
+
+# 只做一件事：检查社区提交的角色系数 JSON 能否被正常解析。
+# 不校验系数数值大小、项数或取值范围 —— 权重是否合理由维护者人工审阅。
+on:
+  pull_request:
+    paths:
+      - '共享角色系数配置文件/**'
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 列出本次新增的配置文件
+        run: |
+          git diff --name-only --diff-filter=A \
+            "origin/${{ github.base_ref }}"...HEAD \
+            -- '共享角色系数配置文件/' | grep '\.json$' > added.txt || true
+          echo "count=$(wc -l < added.txt)"
+          cat added.txt
+
+      - name: 检查 JSON 是否可解析
+        id: check
+        run: |
+          status=0
+          failed=""
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            if python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8-sig"))' "$file"; then
+              echo "OK   $file"
+            else
+              echo "FAIL $file"
+              status=1
+              failed="$failed\n- \`$file\`"
+            fi
+          done < added.txt
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          printf 'failed=%b\n' "$failed" >> "$GITHUB_OUTPUT"
+
+      - name: 解析失败时打标签并留言
+        if: steps.check.outputs.status == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          FAILED: ${{ steps.check.outputs.failed }}
+        run: |
+          gh pr edit "$PR" --add-label invalid-preset
+          gh pr comment "$PR" --body "$(cat <<EOF
+          ### 配置文件解析失败
+
+          以下新增的角色系数 JSON **无法被解析为合法 JSON**，暂时无法审阅收录：
+          $FAILED
+
+          请检查：
+          - 是否有多余的逗号、引号不匹配或不可见字符；
+          - 是否为应用「导出为 JSON」生成的原始文件（请勿手工改写外层结构）；
+          - 文件是否放在 \`共享角色系数配置文件/\` 目录下、扩展名为 \`.json\`。
+
+          修正后重新推送即可。本检查只看 JSON 能否正常解析，
+          **不会校验系数数值大小或项数**，权重取值由维护者人工审阅。
+          EOF
+          )"
+
+  issue:
+    if: >-
+      github.event_name == 'issues' &&
+      contains(github.event.issue.labels.*.name, 'community-preset')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 从 Issue 正文中提取粘贴的 JSON
+        id: extract
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          python3 - <<'PY' > extracted.txt
+          import os, re
+          body = os.environ.get('BODY', '')
+          blocks = re.findall(r'```(?:json)?\s*(\{.*?\})\s*```', body, re.S)
+          if not blocks:
+              blocks = re.findall(r'(\{(?:[^{}]|\{[^{}]*\})*\})', body, re.S)
+          print('\n'.join(b.strip() for b in blocks if b.strip()))
+          PY
+          count=$(grep -c . extracted.txt || true)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: 检查粘贴的 JSON 是否可解析
+        if: steps.extract.outputs.count != '0'
+        id: check
+        run: |
+          status=invalid
+          while IFS= read -r block; do
+            [ -z "$block" ] && continue
+            if printf '%s' "$block" | python3 -c 'import json,sys; json.load(sys.stdin)'; then
+              status=valid
+              break
+            fi
+          done < extracted.txt
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: 解析失败时打标签并留言
+        if: steps.check.outputs.status == 'invalid'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          gh issue edit "$ISSUE" --add-label invalid-preset
+          gh issue comment "$ISSUE" --body "$(cat <<'EOF'
+          ### 粘贴的 JSON 无法解析
+
+          机器人没能把内容读成合法 JSON。请用应用「导出为 JSON」生成的原始内容整段粘贴，
+          或直接把文件拖进 Issue 作为附件上传。
+          本检查**只验证 JSON 格式是否合法**，不涉及系数取值，最终权重由维护者人工审阅。
+          EOF
+          )"

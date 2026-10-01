@@ -1,0 +1,52 @@
+name: 分享角色系数配置
+description: 把你的角色系数配置分享给社区配置库
+title: "[配置分享] <角色名称>"
+labels:
+  - community-preset
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢分享！填写以下内容即可，维护者会人工审阅并收录进
+        `共享角色系数配置文件/`。
+        文件命名请标注**角色链数 + 专武链 + 角色名**，例如 `31绯雪系数`。
+  - type: input
+    id: character
+    attributes:
+      label: 角色名称
+      description: 例如「绯雪」；同一角色的不同链数配置请注明声骸链数与专武链
+      placeholder: 绯雪（声骸 3 链 / 专武 1 链）
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: 提供者昵称 / ID
+      description: 用于收录时署名
+      placeholder: HMSDido
+    validations:
+      required: true
+  - type: textarea
+    id: json
+    attributes:
+      label: JSON 文件内容
+      description: >-
+        把应用「导出为 JSON」得到的 .json 文件拖到下方直接上传，
+        或将文件内容整段粘贴在此处。
+      placeholder: |
+        {
+          "format": 1,
+          "id": "preset-31-feixue",
+          "name": "31绯雪系数",
+          "coefficients": { "critRate": 1.0, "critDmg": 1.2 }
+        }
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: 评分效果截图（可选）
+      description: 把应用内该角色五件声骸的评分结果截图拖到这里，方便其他玩家参考
+      placeholder: 拖拽图片到此处即可上传
+    validations:
+      required: false
