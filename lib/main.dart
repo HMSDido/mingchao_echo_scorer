@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -24,7 +25,6 @@ Future<void> main() async {
   final storage = StorageService(
     await StorageService.resolveRoot(settings.customStorageRoot),
   );
-  await storage.ensureStructure();
 
   final profiles = ProfileController(ProfileRepository(storage));
   final workspace = WorkspaceController(
@@ -47,8 +47,6 @@ Future<void> main() async {
   final windowCloseGuard = Platform.isWindows;
   if (windowCloseGuard) await _configureWindow();
 
-  await Future.wait([profiles.reload(), workspace.bootstrap()]);
-
   runApp(
     MultiProvider(
       providers: [
@@ -60,6 +58,10 @@ Future<void> main() async {
       child: EchoScorerApp(windowCloseGuard: windowCloseGuard),
     ),
   );
+
+  // 磁盘扫描放到首帧之后：主区域在 `loading` 期间本来就有转圈占位，
+  // 先出壳再补数据，感知启动更快。目录结构由 bootstrap 内的 ensureStructure 建立。
+  unawaited(Future.wait([profiles.reload(), workspace.bootstrap()]));
 }
 
 Future<void> _configureWindow() async {

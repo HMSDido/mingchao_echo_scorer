@@ -229,9 +229,17 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   /// 保存全部有改动的文件（窗口关闭前的「全部保存」）。
+  ///
+  /// 逐个落盘但只在最后重扫一次磁盘：每次保存都全量重读会在文件多时
+  /// 变成 k×n 次读，关闭窗口会明显变慢。
   Future<void> saveAll() async {
-    for (final file in List.of(dirtyFiles)) {
-      await saveFile(file);
+    final dirty = List.of(dirtyFiles);
+    for (final file in dirty) {
+      _adopt(await _repo.save(file));
+    }
+    if (dirty.isNotEmpty) {
+      await reloadDisk();
+      notifyListeners();
     }
   }
 

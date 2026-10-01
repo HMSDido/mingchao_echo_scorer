@@ -26,25 +26,41 @@ class ProfileRepository {
       File(p.join(_storage.profilesDir.path, '${profile.id}.json'));
 
   /// 读取全部配置，按最近修改时间倒序（同时间按名称）。
+  ///
+  /// 各文件的读取互相独立，并发执行以缩短启动与每次重扫的耗时。
   Future<LoadResult<CoefficientProfile>> loadAll() async {
     final directory = _storage.profilesDir;
     if (!await directory.exists()) {
       return const LoadResult(items: [], errors: []);
     }
 
+    final files = (await directory.list().toList())
+        .whereType<File>()
+        .where((entity) => entity.path.toLowerCase().endsWith('.json'))
+        .toList();
+    final results = await Future.wait(
+      files.map((entity) async {
+        try {
+          final profile = CoefficientProfile.fromJson(
+            await _storage.readJson(entity),
+          );
+          return (
+            profile: _isSafeId(profile.id) ? profile : _withFreshId(profile),
+            error: null,
+          );
+        } catch (error) {
+          return (profile: null, error: '${p.basename(entity.path)}：$error');
+        }
+      }),
+    );
+
     final items = <CoefficientProfile>[];
     final errors = <String>[];
-    await for (final entity in directory.list()) {
-      if (entity is! File || !entity.path.toLowerCase().endsWith('.json')) {
-        continue;
-      }
-      try {
-        final profile = CoefficientProfile.fromJson(
-          await _storage.readJson(entity),
-        );
-        items.add(_isSafeId(profile.id) ? profile : _withFreshId(profile));
-      } catch (error) {
-        errors.add('${p.basename(entity.path)}：$error');
+    for (final (profile: profile, error: error) in results) {
+      if (error != null) {
+        errors.add(error);
+      } else if (profile != null) {
+        items.add(profile);
       }
     }
     items.sort(_compare);

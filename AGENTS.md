@@ -57,6 +57,10 @@ Key invariants:
   (`ScoreCalculator.roundTo2`).
 - `EchoEntry.sameContentAs` / `ScoreFile.sameContentAs` drive dirty tracking;
   keep them in sync when adding fields. NaN target scores compare equal.
+- Startup and save IO are batched for speed: `main()` calls `runApp` **before**
+  the unawaited `bootstrap()`/`profiles.reload()` (the shell shows a spinner
+  while `WorkspaceController.loading`); both repositories' `loadAll` read files
+  concurrently; `saveAll` writes per file but rescans disk only once.
 
 ## Verified commands
 
@@ -112,6 +116,10 @@ Android specifics (`android/app/build.gradle.kts`, `android/settings.gradle.kts`
 - `minSdk`/`targetSdk`/`compileSdk` come from the Flutter Gradle plugin defaults
 - Release builds are still signed with **debug** keys (explicit `TODO` in
   `build.gradle.kts`) — signing must be configured before any real release.
+  They do run R8 (`isMinifyEnabled` + `isShrinkResources`) with the Flutter
+  keep-rules in `android/app/proguard-rules.pro`; there is no device here to
+  runtime-verify a minified release, so treat a release-only crash as an
+  R8 suspect first.
 - App version lives in `pubspec.yaml` (`version: 1.0.0+1`) and is mirrored by
   `AppConstants.version`; keep the two in sync.
 
@@ -128,7 +136,8 @@ is Windows-only (`Platform.isWindows`); on Android the guard is disabled.
 - The code uses Dart dot-shorthand (`.fromSeed(...)`, `.center`,
   `.headlineMedium`) and null-aware elements (`?trailing`). Valid under Dart 3.13
   — match the existing style instead of "correcting" it.
-- `uses-material-design: true`; Material + `cupertino_icons` only. No custom
+- `uses-material-design: true`; Material icons only (`cupertino_icons` was an
+  unused template leftover and is gone). No custom
   fonts or asset bundles are declared. The catalog data is compiled-in Dart, not
   an asset — adding assets requires extending the `flutter:` section of
   `pubspec.yaml`.

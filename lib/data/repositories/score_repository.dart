@@ -28,28 +28,44 @@ class ScoreRepository {
       File(p.join(folderOf(file).path, entryFileName));
 
   /// 读取全部评分文件，按最近修改时间倒序。
+  ///
+  /// 各文件夹的读取互相独立，并发执行以缩短启动与每次重扫的耗时。
   Future<LoadResult<ScoreFile>> loadAll() async {
     final root = _storage.scoresDir;
     if (!await root.exists()) {
       return const LoadResult(items: [], errors: []);
     }
 
+    final dirs = (await root.list().toList()).whereType<Directory>().toList();
+    final results = await Future.wait(
+      dirs.map((dir) async {
+        final entry = File(p.join(dir.path, entryFileName));
+        if (!await entry.exists()) {
+          return (file: null, error: null);
+        }
+        try {
+          final parsed = ScoreFile.fromJson(await _storage.readJson(entry));
+          // 文件夹名是用户可见的真实名字，优先于 JSON 里可能过时的 name。
+          return (
+            file: parsed.copyWith(name: p.basename(dir.path)),
+            error: null,
+          );
+        } catch (error) {
+          return (file: null, error: '${p.basename(dir.path)}：$error');
+        }
+      }),
+    );
+
     final byId = <String, ScoreFile>{};
     final errors = <String>[];
-    await for (final entity in root.list()) {
-      if (entity is! Directory) continue;
-      final entry = File(p.join(entity.path, entryFileName));
-      if (!await entry.exists()) continue;
-      try {
-        final parsed = ScoreFile.fromJson(await _storage.readJson(entry));
-        // 文件夹名是用户可见的真实名字，优先于 JSON 里可能过时的 name。
-        final file = parsed.copyWith(name: p.basename(entity.path));
+    for (final (file: file, error: error) in results) {
+      if (error != null) {
+        errors.add(error);
+      } else if (file != null) {
         final previous = byId[file.id];
         if (previous == null || file.updatedAt.isAfter(previous.updatedAt)) {
           byId[file.id] = file;
         }
-      } catch (error) {
-        errors.add('${p.basename(entity.path)}：$error');
       }
     }
 
