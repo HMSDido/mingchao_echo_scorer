@@ -1,0 +1,292 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../core/constants.dart';
+import '../../core/util/format.dart';
+import '../../data/models/coefficient_profile.dart';
+import '../../domain/score_calculator.dart';
+import '../../state/profile_controller.dart';
+import '../actions/profile_actions.dart';
+import '../widgets/dialogs.dart';
+
+/// 「编辑角色系数」页：配置列表 + 新建 / 导入。
+class ProfileListPage extends StatefulWidget {
+  const ProfileListPage({super.key});
+
+  @override
+  State<ProfileListPage> createState() => _ProfileListPageState();
+}
+
+class _ProfileListPageState extends State<ProfileListPage> {
+  @override
+  void initState() {
+    super.initState();
+    // 每次进入都刷新，保证别的入口（导入、编辑器保存）的结果立即可见。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<ProfileController>().reload();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = context.watch<ProfileController>();
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '角色系数配置',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      '13 项副词条的权重，评分文件选定后会把它作为快照代入公式',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton.icon(
+                icon: const Icon(Icons.file_download_outlined),
+                label: const Text('导入'),
+                onPressed: () => ProfileActions.importJson(context),
+              ),
+              const SizedBox(width: 4),
+              FilledButton.icon(
+                icon: const Icon(Icons.add),
+                label: const Text('新建配置'),
+                onPressed: () => ProfileActions.create(context),
+              ),
+            ],
+          ),
+        ),
+        const _ShareBanner(),
+        if (controller.profiles.isEmpty)
+          Expanded(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.tune,
+                      size: 46,
+                      color: theme.colorScheme.outline,
+                    ),
+                    const SizedBox(height: 12),
+                    Text('还没有角色系数配置', style: theme.textTheme.titleSmall),
+                    const SizedBox(height: 6),
+                    Text(
+                      '新建一份配置，逐项填入 13 个副词条的系数。\n'
+                      '也可以从别的设备导出的 JSON 文件导入。',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+              itemCount: controller.profiles.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, index) =>
+                  _ProfileTile(profile: controller.profiles[index]),
+            ),
+          ),
+        if (controller.errors.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text(
+              '${controller.errors.length} 个配置文件读取失败：'
+              '${controller.errors.join('；')}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ProfileTile extends StatelessWidget {
+  const _ProfileTile({required this.profile});
+
+  final CoefficientProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final echoMax = ScoreCalculator.roundTo2(
+      ScoreCalculator.echoMaxRaw(profile.coefficients),
+    );
+    final filled = profile.coefficients.values.where((v) => v > 0).length;
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(12)),
+      ),
+      child: InkWell(
+        onTap: () => ProfileActions.edit(context, profile),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      profile.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      profile.isAllZero
+                          ? '全部系数为 0，尚未配置'
+                          : '已设置 $filled/13 项 · 单件理论最高 '
+                                '${Format.score(echoMax)}分 · 五件合计 '
+                                '${Format.score(echoMax * 5)}分',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: profile.isAllZero
+                            ? theme.colorScheme.error
+                            : theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '更新于 ${Format.dateTime(profile.updatedAt)}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.outline,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuButton<String>(
+                tooltip: '更多操作',
+                icon: const Icon(Icons.more_vert),
+                onSelected: (value) => _onMenu(context, value),
+                itemBuilder: (context) => const [
+                  PopupMenuItem(value: 'edit', child: Text('编辑系数')),
+                  PopupMenuItem(value: 'duplicate', child: Text('复制为新配置')),
+                  PopupMenuItem(value: 'export', child: Text('导出为 JSON')),
+                  PopupMenuDivider(),
+                  PopupMenuItem(value: 'delete', child: Text('删除配置')),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onMenu(BuildContext context, String value) async {
+    switch (value) {
+      case 'edit':
+        await ProfileActions.edit(context, profile);
+      case 'duplicate':
+        await ProfileActions.duplicate(context, profile);
+      case 'export':
+        await ProfileActions.export(context, profile);
+      case 'delete':
+        await ProfileActions.delete(context, profile);
+    }
+  }
+}
+
+/// 顶部的共享配置提示：文字说明 + 点击交给系统浏览器打开仓库目录。
+///
+/// 应用自身不发起任何网络请求，链接由操作系统的外部浏览器处理，
+/// 与侧栏「GitHub 仓库」入口是同一种方式。
+class _ShareBanner extends StatelessWidget {
+  const _ShareBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 0, 16, 8),
+      padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.cloud_download_outlined, size: 22, color: scheme.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'GitHub 仓库里有社区分享的现成配置，下载后用上方「导入」载入即可',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '也欢迎把自己的配置发到项目 Issue 或作者邮箱，一起丰富配置库',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            onPressed: () => _open(context),
+            icon: const Icon(Icons.open_in_new, size: 18),
+            label: const Text('打开'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _open(BuildContext context) async {
+    try {
+      final launched = await launchUrl(
+        Uri.parse(AppConstants.sharedProfilesUrl),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && context.mounted) {
+        Dialogs.snack(context, '无法打开浏览器，请手动访问 GitHub 仓库');
+      }
+    } on Exception catch (error) {
+      if (context.mounted) Dialogs.error(context, error);
+    }
+  }
+}

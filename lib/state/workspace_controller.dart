@@ -1,0 +1,325 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
+import '../core/io/transfer.dart';
+import '../data/models/coefficient_profile.dart';
+import '../data/models/echo_entry.dart';
+import '../data/models/score_file.dart';
+import '../data/repositories/score_repository.dart';
+import '../data/repositories/settings_repository.dart';
+import '../data/repositories/storage_service.dart';
+
+/// 主区域当前显示的页面。
+enum ShellView { files, profiles, settings, storage, theme, about }
+
+/// 页面级「离开守卫」：返回 true 表示允许离开。
+///
+/// 声骸详情页用它把「未保存的草稿」纳入窗口关闭前的统一询问。
+typedef LeaveGuard = Future<bool> Function();
+
+/// 已打开的评分文件、当前显示的文件、脏状态，以及磁盘列表。
+///
+/// 脏检查基于「与最近一次落盘内容的语义比较」，因此改了又改回去不算脏，
+/// 关闭时不会打扰用户（对应需求「没有改动直接关闭则不提醒，类似 Word」）。
+class WorkspaceController extends ChangeNotifier {
+  WorkspaceController(this._repo, this._storage, this._settings);
+
+  final ScoreRepository _repo;
+  final StorageService _storage;
+  final SettingsRepository _settings;
+
+  final List<LeaveGuard> _guards = [];
+
+  List<ScoreFile> _diskFiles = const [];
+  List<String> _diskErrors = const [];
+  final List<ScoreFile> _open = [];
+  final Map<String, ScoreFile> _baseline = {};
+
+  String? _activeId;
+  ShellView _view = ShellView.files;
+  String _query = '';
+  bool _loading = true;
+
+  bool get loading => _loading;
+
+  ShellView get view => _view;
+
+  String get fileQuery => _query;
+
+  /// 磁盘上的全部评分文件（按最近修改倒序）。
+  List<ScoreFile> get diskFiles => _diskFiles;
+
+  /// 读取失败的条目（坏文件不会中断整个列表）。
+  List<String> get diskErrors => _diskErrors;
+
+  /// 已打开的文件，最近使用的排在前。
+  List<ScoreFile> get openFiles => List.unmodifiable(_open);
+
+  /// 文件栏中实际显示的文件（受搜索框过滤）。
+  List<ScoreFile> get visibleOpenFiles {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return openFiles;
+    return _open
+        .where((file) => file.name.toLowerCase().contains(query))
+        .toList(growable: false);
+  }
+
+  ScoreFile? get activeFile => byId(_activeId);
+
+  ScoreFile? byId(String? id) {
+    if (id == null) return null;
+    for (final file in _open) {
+      if (file.id == id) return file;
+    }
+    return null;
+  }
+
+  bool isActive(ScoreFile file) => file.id == _activeId;
+
+  bool isOpen(ScoreFile file) => byId(file.id) != null;
+
+  /// 相对最近一次落盘是否有未保存的改动。
+  bool isDirty(ScoreFile file) {
+    final saved = _baseline[file.id];
+    if (saved == null) return true;
+    return !file.sameContentAs(saved);
+  }
+
+  List<ScoreFile> get dirtyFiles =>
+      _open.where(isDirty).toList(growable: false);
+
+  bool get hasUnsavedChanges => dirtyFiles.isNotEmpty;
+
+  // ---------------------------------------------------------------- 生命周期
+
+  /// 启动时读取磁盘数据，并恢复上次退出时打开的文件。
+  Future<void> bootstrap() async {
+    await _storage.ensureStructure();
+    await reloadDisk();
+    for (final id in _settings.lastOpenFileIds) {
+      final file = _diskFiles.where((item) => item.id == id).firstOrNull;
+      if (file != null) _addOpen(file);
+    }
+    if (_open.isEmpty && _diskFiles.isNotEmpty) _addOpen(_diskFiles.first);
+    _activeId = _open.isEmpty ? null : _open.first.id;
+    _loading = false;
+    notifyListeners();
+  }
+
+  /// 重新扫描磁盘（不改动已打开文件的内存状态）。
+  Future<void> reloadDisk() async {
+    final result = await _repo.loadAll();
+    _diskFiles = result.items;
+    _diskErrors = result.errors;
+  }
+
+  /// 重新扫描磁盘并通知界面（「打开文件」对话框用）。
+  Future<void> refreshDisk() async {
+    await reloadDisk();
+    notifyListeners();
+  }
+
+  /// 存储根目录被切换：丢弃当前打开的文件，重新扫描新目录。
+  Future<void> resetForNewRoot() async {
+    _open.clear();
+    _baseline.clear();
+    _activeId = null;
+    _view = ShellView.files;
+    _loading = true;
+    notifyListeners();
+    await reloadDisk();
+    _loading = false;
+    notifyListeners();
+  }
+
+  // -------------------------------------------------------------------- 视图
+
+  void show(ShellView view) {
+    if (_view == view) return;
+    _view = view;
+    notifyListeners();
+  }
+
+  void setFileQuery(String value) {
+    if (_query == value) return;
+    _query = value;
+    notifyListeners();
+  }
+
+  /// 切换主界面显示的文件。**不提示保存** —— 文件并没有被关闭。
+  void select(String id) {
+    if (byId(id) == null) return;
+    final changed = _activeId != id;
+    _activeId = id;
+    _moveToFront(id);
+    final viewChanged = _view != ShellView.files;
+    _view = ShellView.files;
+    if (!changed && !viewChanged) return;
+    unawaited(_persistLastOpen());
+    notifyListeners();
+  }
+
+  void _moveToFront(String id) {
+    final index = _open.indexWhere((file) => file.id == id);
+    if (index > 0) _open.insert(0, _open.removeAt(index));
+  }
+
+  // -------------------------------------------------------------- 文件操作
+
+  /// 新建评分文件：立即落盘并打开，随后由总览页引导「选择角色」。
+  Future<ScoreFile> createFile(String name) async {
+    final created = await _repo.save(ScoreFile.empty(name: name));
+    await reloadDisk();
+    _addOpen(created);
+    _activeId = created.id;
+    _view = ShellView.files;
+    unawaited(_persistLastOpen());
+    notifyListeners();
+    return created;
+  }
+
+  /// 打开一个已在磁盘上的文件（已经打开则只是切换到它）。
+  void openFile(ScoreFile file) {
+    if (byId(file.id) != null) {
+      select(file.id);
+      return;
+    }
+    _addOpen(file);
+    _activeId = file.id;
+    _view = ShellView.files;
+    unawaited(_persistLastOpen());
+    notifyListeners();
+  }
+
+  /// 写入内存改动（标记为脏，不落盘）。
+  void updateFile(ScoreFile next) {
+    final index = _open.indexWhere((file) => file.id == next.id);
+    if (index < 0) return;
+    _open[index] = next;
+    notifyListeners();
+  }
+
+  void updateEcho(String fileId, EchoEntry echo) {
+    final file = byId(fileId);
+    if (file == null) return;
+    updateFile(file.withEcho(echo));
+  }
+
+  void renameEcho(String fileId, int slot, String name) {
+    final file = byId(fileId);
+    if (file == null) return;
+    updateFile(file.withEcho(file.echoAt(slot).copyWith(name: name)));
+  }
+
+  /// 把角色系数快照套用到文件（新建后「选择角色」，或之后「更换角色」）。
+  void applyProfile(ScoreFile file, CoefficientProfile profile) =>
+      updateFile(file.applyingProfile(profile));
+
+  /// 落盘单个文件。文件夹名可能被规范化/去重，因此以仓库返回值为准。
+  Future<void> saveFile(ScoreFile file) async {
+    _adopt(await _repo.save(file));
+    await reloadDisk();
+    notifyListeners();
+  }
+
+  Future<void> saveActive() async {
+    final file = activeFile;
+    if (file != null) await saveFile(file);
+  }
+
+  /// 保存全部有改动的文件（窗口关闭前的「全部保存」）。
+  Future<void> saveAll() async {
+    for (final file in List.of(dirtyFiles)) {
+      await saveFile(file);
+    }
+  }
+
+  /// 重命名文件：磁盘文件夹同步改名，改动会一并落盘。
+  Future<void> renameFile(ScoreFile file, String newName) async {
+    _adopt(await _repo.rename(file, newName));
+    await reloadDisk();
+    notifyListeners();
+  }
+
+  /// 关闭文件（调用方负责先处理未保存改动）。
+  Future<void> closeFile(ScoreFile file) async {
+    _open.removeWhere((item) => item.id == file.id);
+    _baseline.remove(file.id);
+    if (_activeId == file.id) {
+      _activeId = _open.isEmpty ? null : _open.first.id;
+    }
+    unawaited(_persistLastOpen());
+    notifyListeners();
+  }
+
+  /// 从磁盘删除文件并关闭。
+  Future<void> deleteFile(ScoreFile file) async {
+    await _repo.delete(file);
+    _open.removeWhere((item) => item.id == file.id);
+    _baseline.remove(file.id);
+    if (_activeId == file.id) {
+      _activeId = _open.isEmpty ? null : _open.first.id;
+    }
+    await reloadDisk();
+    unawaited(_persistLastOpen());
+    notifyListeners();
+  }
+
+  Future<void> importScoreJson(Map<String, dynamic> json) async {
+    final imported = await _repo.importFromJson(json);
+    await reloadDisk();
+    _addOpen(imported);
+    _activeId = imported.id;
+    _view = ShellView.files;
+    unawaited(_persistLastOpen());
+    notifyListeners();
+  }
+
+  /// 导出到用户选择的位置，返回写入路径；取消返回 null。
+  Future<String?> exportScoreJson(ScoreFile file) => Transfer.saveJson(
+    suggestedName: file.name,
+    json: file.toJson(),
+    fallbackDir: _storage.exportsDir,
+  );
+
+  // ------------------------------------------------------------------ 守卫
+
+  /// 注册一个离开守卫，返回注销函数。
+  void Function() registerGuard(LeaveGuard guard) {
+    _guards.add(guard);
+    return () => _guards.remove(guard);
+  }
+
+  /// 依次询问所有守卫；任一拒绝则返回 false。
+  Future<bool> runGuards() async {
+    for (final guard in List.of(_guards)) {
+      if (!await guard()) return false;
+    }
+    return true;
+  }
+
+  // ------------------------------------------------------------------ 内部
+
+  void _addOpen(ScoreFile file) {
+    _open.removeWhere((item) => item.id == file.id);
+    _open.insert(0, file);
+    _baseline[file.id] = file;
+  }
+
+  /// 用落盘后的版本替换内存中的文件，并把它作为新的脏检查基线。
+  void _adopt(ScoreFile saved) {
+    final index = _open.indexWhere((file) => file.id == saved.id);
+    if (index >= 0) {
+      _open[index] = saved;
+    } else {
+      _open.insert(0, saved);
+    }
+    _baseline[saved.id] = saved;
+    if (_activeId == null || _activeId == saved.id) _activeId = saved.id;
+    unawaited(_persistLastOpen());
+  }
+
+  Future<void> _persistLastOpen() =>
+      _settings.setLastOpenFileIds(_open.map((file) => file.id).toList());
+}
