@@ -733,6 +733,79 @@ void main() {
     await _dismissSnackBars(tester);
   });
 
+  testWidgets('标签页批量导出：勾选的文件链接各带名字说明头', (tester) async {
+    final harness = await _pumpApp(tester);
+    _mockClipboard(tester);
+    await _seedScoredFile(tester, fileName: '甲文件');
+    await _seedScoredFile(tester, fileName: '乙文件');
+
+    tester.view.physicalSize = const Size(600, 900);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('标签页'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('更多操作').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('批量导出'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(CheckboxListTile, '甲文件'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '导出'));
+    await _settle(tester, dismissSnack: false);
+
+    expect(find.text('已复制 1 个评分文件的分享链接'), findsOneWidget);
+    await _dismissSnackBars(tester);
+
+    final clipboard = await harness.runAsync(
+      () => Clipboard.getData(Clipboard.kTextPlain),
+    );
+    final lines = clipboard!.text!.split('\n');
+    expect(lines, hasLength(2));
+    expect(lines.first, '# 甲文件评分文件');
+    expect(lines[1], startsWith('echoscorer://'));
+  });
+
+  testWidgets('文件栏组菜单导出本组，一次复制组内全部链接', (tester) async {
+    final harness = await _pumpApp(tester);
+    _mockClipboard(tester);
+    final a = (await harness.runAsync(
+      () => harness.workspace.createFile('甲文件'),
+    ))!;
+    final b = (await harness.runAsync(
+      () => harness.workspace.createFile('乙文件'),
+    ))!;
+    await harness.runAsync(() => harness.workspace.createFile('组外文件'));
+    expect(harness.workspace.addLayoutGroup('日常'), isTrue);
+    harness.workspace.placeInLayoutGroup('日常', a.id);
+    harness.workspace.placeInLayoutGroup('日常', b.id);
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(FilePanel),
+        matching: find.byKey(const ValueKey('file-group-menu-日常')),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('导出本组'));
+    await _settle(tester, dismissSnack: false);
+
+    expect(find.text('已复制分组「日常」的 2 个分享链接'), findsOneWidget);
+    await _dismissSnackBars(tester);
+
+    final clipboard = await harness.runAsync(
+      () => Clipboard.getData(Clipboard.kTextPlain),
+    );
+    final lines = clipboard!.text!.split('\n');
+    expect(lines, hasLength(4));
+    expect(
+      lines.where((line) => line.startsWith('#')),
+      containsAll(<String>['# 甲文件评分文件', '# 乙文件评分文件']),
+    );
+    expect(lines, isNot(contains('# 组外文件评分文件')));
+  });
+
   testWidgets('配置页 ⋮ 菜单收拢导入导出，并能批量删除勾选的配置', (tester) async {
     final harness = await _pumpApp(tester);
     await harness.runAsync(() async {

@@ -145,6 +145,25 @@ class ProfileActions {
     if (context.mounted) Dialogs.snack(context, '已删除分组「$name」');
   }
 
+  /// 导出本组：把组内全部配置的分享链接一次复制进剪贴板。
+  static Future<void> exportGroup(BuildContext context, String name) async {
+    final profiles = context.read<ProfileController>();
+    final members = profiles
+        .layoutGroupMemberIds(name)
+        .map(profiles.byId)
+        .nonNulls
+        .toList();
+    if (members.isEmpty) {
+      Dialogs.snack(context, '分组「$name」里没有配置');
+      return;
+    }
+    await ShareActions.copy(
+      context,
+      ProfileShare.encodeAll(members),
+      '已复制分组「$name」的 ${members.length} 个分享链接',
+    );
+  }
+
   /// 以现有配置为模板复制一份（系数照搬，名字另取）。
   static Future<void> duplicate(
     BuildContext context,

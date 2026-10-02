@@ -236,6 +236,50 @@ class FileActions {
     );
   }
 
+  /// 批量导出：勾选多个文件，把它们的分享链接一次复制进剪贴板。
+  static Future<void> exportMany(BuildContext context) async {
+    final workspace = context.read<WorkspaceController>();
+    final files = workspace.openFiles;
+    if (files.isEmpty) {
+      Dialogs.snack(context, '没有打开的评分文件');
+      return;
+    }
+    final picked = await Dialogs.pickMulti<ScoreFile>(
+      context,
+      title: '批量导出评分文件',
+      items: files,
+      labelBuilder: (file) => file.name,
+      hint: '选中的分享链接（各带一行名字说明）将一起复制到剪贴板。',
+      emptyMessage: '没有打开的评分文件',
+      confirmLabel: '导出',
+    );
+    if (picked == null || picked.isEmpty || !context.mounted) return;
+    await ShareActions.copy(
+      context,
+      ScoreShare.encodeAll(picked),
+      '已复制 ${picked.length} 个评分文件的分享链接',
+    );
+  }
+
+  /// 导出本组：把组内全部文件的分享链接一次复制进剪贴板。
+  static Future<void> exportGroup(BuildContext context, String name) async {
+    final workspace = context.read<WorkspaceController>();
+    final members = workspace
+        .layoutGroupMemberIds(name)
+        .map(workspace.byId)
+        .nonNulls
+        .toList();
+    if (members.isEmpty) {
+      Dialogs.snack(context, '分组「$name」里没有文件');
+      return;
+    }
+    await ShareActions.copy(
+      context,
+      ScoreShare.encodeAll(members),
+      '已复制分组「$name」的 ${members.length} 个分享链接',
+    );
+  }
+
   static Future<void> rename(BuildContext context, ScoreFile file) async {
     final workspace = context.read<WorkspaceController>();
     final name = await Dialogs.promptText(

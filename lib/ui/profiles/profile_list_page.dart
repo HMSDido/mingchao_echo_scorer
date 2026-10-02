@@ -249,6 +249,7 @@ class _GroupTile extends StatelessWidget {
                   itemBuilder: (context) => const [
                     PopupMenuItem(value: 'create', child: Text('在组内新建配置')),
                     PopupMenuItem(value: 'rename', child: Text('重命名分组')),
+                    PopupMenuItem(value: 'export', child: Text('导出本组')),
                     PopupMenuItem(value: 'clear', child: Text('清空分组（删配置）')),
                     PopupMenuDivider(),
                     PopupMenuItem(value: 'delete', child: Text('删除分组（留配置）')),
@@ -268,6 +269,8 @@ class _GroupTile extends StatelessWidget {
         await ProfileActions.create(context, inGroup: name);
       case 'rename':
         await ProfileActions.renameGroup(context, name);
+      case 'export':
+        await ProfileActions.exportGroup(context, name);
       case 'clear':
         await ProfileActions.clearGroup(context, name);
       case 'delete':

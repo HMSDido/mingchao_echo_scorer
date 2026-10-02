@@ -252,6 +252,8 @@ class _NarrowAppBar extends StatelessWidget implements PreferredSizeWidget {
                       FileActions.open(context);
                     case 'import':
                       FileActions.importFromClipboard(context);
+                    case 'exportMany':
+                      FileActions.exportMany(context);
                     case 'deleteMany':
                       FileActions.deleteMany(context);
                     case 'copy':
@@ -272,6 +274,7 @@ class _NarrowAppBar extends StatelessWidget implements PreferredSizeWidget {
                   const PopupMenuItem(value: 'create', child: Text('新建评分文件')),
                   const PopupMenuItem(value: 'open', child: Text('打开已有文件')),
                   const PopupMenuItem(value: 'import', child: Text('粘贴导入')),
+                  const PopupMenuItem(value: 'exportMany', child: Text('批量导出')),
                   const PopupMenuItem(value: 'deleteMany', child: Text('批量删除')),
                   if (file != null) ...[
                     const PopupMenuDivider(),

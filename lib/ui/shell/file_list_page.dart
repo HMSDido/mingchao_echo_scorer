@@ -73,6 +73,8 @@ class _FileListPageState extends State<FileListPage> {
                   FileActions.importFromClipboard(context);
                 case 'copyAll':
                   FileActions.copyAllShareLinks(context);
+                case 'exportMany':
+                  FileActions.exportMany(context);
                 case 'deleteMany':
                   FileActions.deleteMany(context);
               }
@@ -82,6 +84,7 @@ class _FileListPageState extends State<FileListPage> {
               PopupMenuItem(value: 'open', child: Text('打开已有文件')),
               PopupMenuItem(value: 'import', child: Text('粘贴导入')),
               PopupMenuItem(value: 'copyAll', child: Text('复制全部分享链接')),
+              PopupMenuItem(value: 'exportMany', child: Text('批量导出')),
               PopupMenuItem(value: 'deleteMany', child: Text('批量删除')),
             ],
           ),
@@ -239,6 +242,7 @@ class _GroupRow extends StatelessWidget {
                   itemBuilder: (context) => const [
                     PopupMenuItem(value: 'create', child: Text('在组内新建文件')),
                     PopupMenuItem(value: 'rename', child: Text('重命名分组')),
+                    PopupMenuItem(value: 'export', child: Text('导出本组')),
                     PopupMenuItem(value: 'clear', child: Text('清空分组（删文件）')),
                     PopupMenuDivider(),
                     PopupMenuItem(value: 'delete', child: Text('删除分组（留文件）')),
@@ -258,6 +262,8 @@ class _GroupRow extends StatelessWidget {
         await FileActions.create(context, inGroup: name);
       case 'rename':
         await FileActions.renameGroup(context, name);
+      case 'export':
+        await FileActions.exportGroup(context, name);
       case 'clear':
         await FileActions.clearGroup(context, name);
       case 'delete':

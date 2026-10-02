@@ -8,6 +8,9 @@ import '../../domain/score_calculator.dart';
 import '../../state/workspace_controller.dart';
 import '../actions/file_actions.dart';
 
+/// 文件栏头部 ⋮ 菜单项。用独立枚举避免与行内 `PopupMenuButton<String>` 撞类型。
+enum _PanelMenu { exportMany, copyAll }
+
 /// 左侧文件栏（宽屏）：已打开评分文件的可分组、可拖拽列表 + 文件名搜索。
 ///
 /// 无搜索词时用 [ReorderableListView]：组标题也是可拖的行，
@@ -84,6 +87,30 @@ class _FilePanelState extends State<FilePanel> {
                   tooltip: '打开文件',
                   icon: const Icon(Icons.folder_open),
                   onPressed: () => FileActions.open(context),
+                ),
+                PopupMenuButton<_PanelMenu>(
+                  key: const ValueKey('file-panel-menu'),
+                  tooltip: '文件栏操作',
+                  icon: const Icon(Icons.more_vert, size: 18),
+                  padding: EdgeInsets.zero,
+                  onSelected: (value) {
+                    switch (value) {
+                      case _PanelMenu.exportMany:
+                        FileActions.exportMany(context);
+                      case _PanelMenu.copyAll:
+                        FileActions.copyAllShareLinks(context);
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: _PanelMenu.exportMany,
+                      child: Text('批量导出'),
+                    ),
+                    PopupMenuItem(
+                      value: _PanelMenu.copyAll,
+                      child: Text('复制全部分享链接'),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -232,6 +259,7 @@ class _GroupTile extends StatelessWidget {
                   itemBuilder: (context) => const [
                     PopupMenuItem(value: 'create', child: Text('在组内新建文件')),
                     PopupMenuItem(value: 'rename', child: Text('重命名分组')),
+                    PopupMenuItem(value: 'export', child: Text('导出本组')),
                     PopupMenuItem(value: 'clear', child: Text('清空分组（删文件）')),
                     PopupMenuDivider(),
                     PopupMenuItem(value: 'delete', child: Text('删除分组（留文件）')),
@@ -251,6 +279,8 @@ class _GroupTile extends StatelessWidget {
         await FileActions.create(context, inGroup: name);
       case 'rename':
         await FileActions.renameGroup(context, name);
+      case 'export':
+        await FileActions.exportGroup(context, name);
       case 'clear':
         await FileActions.clearGroup(context, name);
       case 'delete':
