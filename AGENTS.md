@@ -77,9 +77,18 @@ Key invariants:
   (`library.profileLayout` / `library.scoreLayout`). It never touches data
   models or `ShareLink`, and layout ops must not dirty files. Deleting a group
   header hoists its members to the root layer; 清空 deletes members instead.
+  Groups are **collapsed by default**; prefs store the *expanded* set
+  (`library.profileExpanded` / `library.scoreExpanded`), and `collapsedView`
+  hides members of non-expanded groups. Auto-expand on 组内新建 / drop-in;
+  rename carries the expansion over, delete drops it. The 选择角色 dialog
+  reuses `pickerLayoutRows` (uncollapsed rows) but keeps its own **session-local**
+  expand state — it must not write the prefs keys.
   Dragging uses `ReorderableListView` + `onReorderItem` (Flutter 3.47:
-  `onReorder` is deprecated), whose newIndex is post-removal — `moveNode`
-  follows those coordinates.
+  `onReorder` is deprecated) over the **visible rows**; `moveNodeInView`
+  translates view coords to layout coords. Flutter's newIndex removes **only the
+  dragged row** (group members stay in place), so the anchor is
+  `remaining[insertIndex]`; member rows that rode along in the view must be
+  offset out of the insertion index, and group drags move the whole hidden block.
 - **Coefficients are snapshotted** into each `ScoreFile` when a profile is
   applied, so later profile edits don't silently rescore saved files.
 - Accumulate at **full precision, round once** to 2 decimals for display
@@ -89,6 +98,9 @@ Key invariants:
 - **Import/export goes through the clipboard, not file dialogs.** `ShareLink`
   (`lib/data/models/share_link.dart`) encodes `echoscorer://` + Base64(UTF-8 JSON),
   one item per `\n`-separated line; `ProfileShare` / `ScoreShare` wrap it per model.
+  Encoded output carries a human-readable `# <名字>…` comment line above the link;
+  parse skips `#` lines and blanks silently (never a failure), so old header-less
+  links and hand-cleaned paste both keep working.
   They tell the two kinds apart by whether the JSON has an `echoes` **list**, so
   pasting a profile link into the score importer (or vice versa) reports an
   explicit Chinese error instead of silently creating a bogus record. Parsing is
@@ -159,7 +171,7 @@ Android specifics (`android/app/build.gradle.kts`, `android/settings.gradle.kts`
   keep-rules in `android/app/proguard-rules.pro`; there is no device here to
   runtime-verify a minified release, so treat a release-only crash as an
   R8 suspect first.
-- App version lives in `pubspec.yaml` (`version: 1.0.2+3`) and is mirrored by
+- App version lives in `pubspec.yaml` (`version: 1.0.4+5`) and is mirrored by
   `AppConstants.version`; keep the two in sync.
 
 Windows specifics: `main.dart` calls `windowManager.setPreventClose(true)` so
