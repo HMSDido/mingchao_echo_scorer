@@ -10,7 +10,7 @@ import '../../state/profile_controller.dart';
 import '../actions/profile_actions.dart';
 import '../widgets/dialogs.dart';
 
-/// 「编辑角色系数」页：配置列表 + 新建 / 导入。
+/// 「编辑角色系数」页：配置列表 + 新建按钮 + ⋮ 菜单（导入 / 导出 / 批量删除）。
 class ProfileListPage extends StatefulWidget {
   const ProfileListPage({super.key});
 
@@ -59,10 +59,27 @@ class _ProfileListPageState extends State<ProfileListPage> {
                   ],
                 ),
               ),
-              TextButton.icon(
-                icon: const Icon(Icons.file_download_outlined),
-                label: const Text('导入'),
-                onPressed: () => ProfileActions.importJson(context),
+              PopupMenuButton<String>(
+                key: const ValueKey('profiles-menu'),
+                tooltip: '更多操作',
+                onSelected: (value) {
+                  switch (value) {
+                    case 'import':
+                      ProfileActions.importFromClipboard(context);
+                    case 'copyAll':
+                      ProfileActions.copyToClipboard(
+                        context,
+                        context.read<ProfileController>().profiles,
+                      );
+                    case 'deleteMany':
+                      ProfileActions.deleteMany(context);
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(value: 'import', child: Text('从剪贴板导入配置')),
+                  PopupMenuItem(value: 'copyAll', child: Text('复制全部配置到剪贴板')),
+                  PopupMenuItem(value: 'deleteMany', child: Text('批量删除')),
+                ],
               ),
               const SizedBox(width: 4),
               FilledButton.icon(
@@ -92,7 +109,7 @@ class _ProfileListPageState extends State<ProfileListPage> {
                     const SizedBox(height: 6),
                     Text(
                       '新建一份配置，逐项填入 13 个副词条的系数。\n'
-                      '也可以从别的设备导出的 JSON 文件导入。',
+                      '也可以复制别人分享的内容，再点右上 ⋮ →「从剪贴板导入配置」。',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
@@ -196,7 +213,7 @@ class _ProfileTile extends StatelessWidget {
                 itemBuilder: (context) => const [
                   PopupMenuItem(value: 'edit', child: Text('编辑系数')),
                   PopupMenuItem(value: 'duplicate', child: Text('复制为新配置')),
-                  PopupMenuItem(value: 'export', child: Text('导出为 JSON')),
+                  PopupMenuItem(value: 'copy', child: Text('复制分享链接')),
                   PopupMenuDivider(),
                   PopupMenuItem(value: 'delete', child: Text('删除配置')),
                 ],
@@ -214,8 +231,8 @@ class _ProfileTile extends StatelessWidget {
         await ProfileActions.edit(context, profile);
       case 'duplicate':
         await ProfileActions.duplicate(context, profile);
-      case 'export':
-        await ProfileActions.export(context, profile);
+      case 'copy':
+        await ProfileActions.copyToClipboard(context, [profile]);
       case 'delete':
         await ProfileActions.delete(context, profile);
     }
@@ -250,7 +267,7 @@ class _ShareBanner extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'GitHub 仓库里有社区分享的现成配置，下载后用上方「导入」载入即可',
+                  'GitHub 仓库里有社区分享的现成配置，复制内容后用右上 ⋮ →「从剪贴板导入配置」载入',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onSurface,
                     fontWeight: FontWeight.w600,
@@ -258,7 +275,7 @@ class _ShareBanner extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '也欢迎把自己的配置发到项目 Issue 或作者邮箱，一起丰富配置库',
+                  '也欢迎用 ⋮ →「复制分享链接」把自己的配置发过来，一起丰富配置库',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),

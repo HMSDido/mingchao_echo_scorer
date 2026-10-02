@@ -202,17 +202,31 @@ class _EchoDetailPageState extends State<EchoDetailPage> {
                   icon: const Icon(Icons.edit_outlined),
                   onPressed: _rename,
                 ),
-                TextButton.icon(
-                  icon: const Icon(Icons.undo),
-                  label: const Text('撤销改动'),
-                  onPressed: _dirty ? _resetDraft : null,
-                ),
+                if (wide)
+                  TextButton.icon(
+                    icon: const Icon(Icons.undo),
+                    label: const Text('撤销改动'),
+                    onPressed: _dirty ? _resetDraft : null,
+                  )
+                else
+                  IconButton(
+                    tooltip: '撤销改动',
+                    icon: const Icon(Icons.undo),
+                    onPressed: _dirty ? _resetDraft : null,
+                  ),
                 const SizedBox(width: 4),
-                FilledButton.icon(
-                  icon: const Icon(Icons.save_outlined),
-                  label: const Text('保存本声骸'),
-                  onPressed: _dirty ? _saveEcho : null,
-                ),
+                if (wide)
+                  FilledButton.icon(
+                    icon: const Icon(Icons.save_outlined),
+                    label: const Text('保存本声骸'),
+                    onPressed: _dirty ? _saveEcho : null,
+                  )
+                else
+                  IconButton(
+                    tooltip: '保存本声骸',
+                    icon: const Icon(Icons.save_outlined),
+                    onPressed: _dirty ? _saveEcho : null,
+                  ),
                 const SizedBox(width: 12),
               ],
             ),
@@ -220,7 +234,12 @@ class _EchoDetailPageState extends State<EchoDetailPage> {
                 ? Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(child: inputs),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.all(16),
+                          child: inputs,
+                        ),
+                      ),
                       const VerticalDivider(width: 1),
                       SizedBox(
                         width: 400,
@@ -283,8 +302,8 @@ class _InputList extends StatelessWidget {
     final theme = Theme.of(context);
     final remaining = EchoEntry.maxSubstats - draft.filledCount;
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [

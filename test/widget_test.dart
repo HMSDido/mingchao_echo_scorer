@@ -1,11 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mingchao_echo_scorer/app.dart';
 import 'package:mingchao_echo_scorer/data/catalog/substat_type.dart';
 import 'package:mingchao_echo_scorer/data/models/coefficients.dart';
 import 'package:mingchao_echo_scorer/data/models/score_file.dart';
+import 'package:mingchao_echo_scorer/data/models/share_link.dart';
 import 'package:mingchao_echo_scorer/data/repositories/background_image_service.dart';
 import 'package:mingchao_echo_scorer/data/repositories/profile_repository.dart';
 import 'package:mingchao_echo_scorer/data/repositories/score_repository.dart';
@@ -16,8 +18,10 @@ import 'package:mingchao_echo_scorer/state/settings_controller.dart';
 import 'package:mingchao_echo_scorer/state/workspace_controller.dart';
 import 'package:mingchao_echo_scorer/ui/detail/echo_detail_page.dart';
 import 'package:mingchao_echo_scorer/ui/overview/echo_card.dart';
+import 'package:mingchao_echo_scorer/ui/shell/file_list_page.dart';
 import 'package:mingchao_echo_scorer/ui/shell/file_panel.dart';
 import 'package:mingchao_echo_scorer/ui/shell/nav_rail.dart';
+import 'package:mingchao_echo_scorer/ui/shell/top_toolbar.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -74,6 +78,51 @@ void main() {
     expect(file.profileName, '长离');
     expect(file.coefficients[SubstatType.critRate], 1.0);
     expect(file.coefficients[SubstatType.flatAtk], 0.0);
+  });
+
+  testWidgets('页首「更换系数」换一份快照，改动被脏检查认出', (tester) async {
+    final harness = await _pumpApp(tester);
+    await harness.runAsync(() async {
+      final changli = await harness.profiles.create('长离');
+      await harness.profiles.save(
+        changli.copyWith(coefficients: _fiveCoefficients),
+      );
+      final shou = await harness.profiles.create('21守岸人');
+      await harness.profiles.save(
+        shou.copyWith(coefficients: {SubstatType.critDmg: 2.0}),
+      );
+      await harness.workspace.createFile('测试文件');
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '选择角色'));
+    await _settle(tester);
+    await tester.tap(find.text('长离').last);
+    await _settle(tester);
+    await harness.runAsync(
+      () => harness.workspace.saveFile(harness.workspace.activeFile!),
+    );
+    await tester.pumpAndSettle();
+    expect(harness.workspace.isDirty(harness.workspace.activeFile!), isFalse);
+
+    // 入口在页首、贴着当前系数名；页脚不再重复放一个。
+    expect(find.byKey(const ValueKey('swap-profile')), findsOneWidget);
+    expect(find.text('更换角色'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('swap-profile')));
+    // 更换系数前会先 reload() 重扫配置，这是真实 IO，得用 _settle 放行。
+    await _settle(tester);
+    expect(find.text('更换角色系数配置'), findsOneWidget);
+    await tester.tap(find.text('21守岸人').last);
+    await _settle(tester);
+
+    final file = harness.workspace.activeFile!;
+    expect(file.profileName, '21守岸人');
+    // 系数整体换成新快照，并按新系数重算。
+    expect(file.coefficients[SubstatType.critRate], 0.0);
+    expect(file.coefficients[SubstatType.critDmg], 2.0);
+    expect(find.textContaining('理论最高 210.00分'), findsOneWidget);
+    // 切换算内容改动：未保存状态要能被脏检查认出。
+    expect(harness.workspace.isDirty(file), isTrue);
   });
 
   testWidgets('总览页显示总分与 5 张声骸卡片', (tester) async {
@@ -159,6 +208,28 @@ void main() {
     // 66.40/69.40 ≈ 0.957 → ACE 级。
     expect(find.text('66.40分 ACE级'), findsOneWidget);
     expect(find.textContaining('暴击伤害、防御%、攻击%、生命%'), findsOneWidget);
+    expect(find.textContaining('已选 1/5'), findsOneWidget);
+  });
+
+  testWidgets('窄屏详情页渲染词条行，点档位标签即可输入', (tester) async {
+    await _pumpApp(tester);
+    await _seedScoredFile(tester);
+
+    tester.view.physicalSize = const Size(600, 900);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(EchoCard).first);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(EchoDetailPage), findsOneWidget);
+    // 13 行词条与档位标签都要渲染出来（曾因内层 ListView 拿到无界高度整页空白）。
+    expect(find.text('暴击率'), findsOneWidget);
+    expect(find.textContaining('已选 0/5'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(ChoiceChip, '3档 7.5%').first);
+    await tester.pumpAndSettle();
+
+    expect(_plainText(tester, 'current-score'), '7.50分 无评级');
     expect(find.textContaining('已选 1/5'), findsOneWidget);
   });
 
@@ -329,21 +400,56 @@ void main() {
     expect(reloaded!.items.single.echoes.first.name, '改个名');
   });
 
-  testWidgets('窄屏时导航栏与文件栏收进抽屉', (tester) async {
-    await _pumpApp(tester);
+  testWidgets('窄屏收起侧栏与功能栏，标签页按钮打开全屏文件列表', (tester) async {
+    final harness = await _pumpApp(tester);
     await _seedScoredFile(tester);
 
     tester.view.physicalSize = const Size(600, 900);
     await tester.pumpAndSettle();
 
     expect(find.byType(NavRail), findsNothing);
-    expect(find.text('评分文件'), findsNothing);
+    expect(find.byType(FilePanel), findsNothing);
+    expect(find.byType(TopToolbar), findsNothing);
+    // 顶栏标题换成当前文件名，正文仍是总览页。
+    expect(find.text('测试文件'), findsOneWidget);
+    expect(find.byType(EchoCard), findsNWidgets(5));
+
+    await tester.tap(find.byTooltip('标签页'));
+    await tester.pumpAndSettle();
+
+    final list = find.byType(FileListPage);
+    expect(list, findsOneWidget);
+    expect(
+      find.descendant(of: list, matching: find.text('测试文件')),
+      findsOneWidget,
+    );
+    // 行尾直接给分享 / 重命名 / 删除三个常用操作。
+    expect(
+      find.descendant(of: list, matching: find.byTooltip('复制分享链接')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: list, matching: find.byTooltip('重命名')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: list, matching: find.byTooltip('删除')),
+      findsOneWidget,
+    );
+
+    // 点一行切到该文件并返回列表。
+    await tester.tap(find.descendant(of: list, matching: find.text('测试文件')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(FileListPage), findsNothing);
+    expect(harness.workspace.activeFile!.name, '测试文件');
 
     await tester.tap(find.byIcon(Icons.menu));
     await tester.pumpAndSettle();
 
     expect(find.byType(NavRail), findsOneWidget);
-    // 抽屉里 NavRail 的导航项与文件栏标题都叫「评分文件」，只在 NavRail 内断言。
+    // 抽屉里只放导航，不再塞文件栏。
+    expect(find.byType(FilePanel), findsNothing);
     expect(
       find.descendant(of: find.byType(NavRail), matching: find.text('评分文件')),
       findsOneWidget,
@@ -367,6 +473,283 @@ void main() {
     );
     expect(restore.onPressed, isNull);
     expect(find.byType(Image), findsNothing);
+  });
+
+  testWidgets('复制全部配置到剪贴板，清空后粘贴导入可原样恢复', (tester) async {
+    final harness = await _pumpApp(tester);
+    _mockClipboard(tester);
+
+    // 三份中文名配置，各自只有一项系数非 0，便于验证内容真的被搬过去了。
+    await harness.runAsync(() async {
+      for (final (name, coefficients) in [
+        ('01长离', {SubstatType.critRate: 1.0}),
+        ('21守岸人', {SubstatType.critDmg: 0.9}),
+        ('卡卡罗', {SubstatType.atkPct: 0.75}),
+      ]) {
+        final created = await harness.profiles.create(name);
+        await harness.profiles.save(
+          created.copyWith(coefficients: coefficients),
+        );
+      }
+    });
+
+    harness.workspace.show(ShellView.profiles);
+    await tester.pumpAndSettle();
+    expect(find.text('01长离'), findsOneWidget);
+
+    await _openProfilesMenu(tester, '复制全部配置到剪贴板');
+    await _settle(tester, dismissSnack: false);
+    expect(find.text('已复制 3 个配置到剪贴板'), findsOneWidget);
+    await _dismissSnackBars(tester);
+
+    // 剪贴板里是三行分享链接，配置内容不以明文出现。
+    final clipboard = await harness.runAsync(
+      () => Clipboard.getData(Clipboard.kTextPlain),
+    );
+    final lines = clipboard!.text!.split('\n');
+    expect(lines, hasLength(3));
+    expect(lines.every((line) => line.startsWith('echoscorer://')), isTrue);
+    expect(clipboard.text, isNot(contains('守岸人')));
+
+    // 清空列表，模拟换到一台没有任何配置的设备。
+    await harness.runAsync(() async {
+      for (final profile in List.of(harness.profiles.profiles)) {
+        await harness.profiles.delete(profile.id);
+      }
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('还没有角色系数配置'), findsOneWidget);
+
+    await _openProfilesMenu(tester, '从剪贴板导入配置');
+    await _settleUntil(tester, () => harness.profiles.profiles.length == 3);
+
+    expect(find.text('成功导入 3 个配置'), findsOneWidget);
+    expect(find.text('01长离'), findsOneWidget);
+    expect(find.text('21守岸人'), findsOneWidget);
+    expect(find.text('卡卡罗'), findsOneWidget);
+    expect(find.textContaining('已设置 1/13 项'), findsNWidgets(3));
+    expect(
+      harness.profiles.profiles
+          .firstWhere((profile) => profile.name == '01长离')
+          .coefficients[SubstatType.critRate],
+      1.0,
+    );
+    await _dismissSnackBars(tester);
+  });
+
+  testWidgets('剪贴板里混着无效内容时，跳过坏行并列出原因', (tester) async {
+    final harness = await _pumpApp(tester);
+    final created = await harness.runAsync(() => harness.profiles.create('长离'));
+    _mockClipboard(tester, initial: '${ProfileShare.encode(created!)}\n不是配置');
+
+    harness.workspace.show(ShellView.profiles);
+    await tester.pumpAndSettle();
+
+    await _openProfilesMenu(tester, '从剪贴板导入配置');
+    await _settleUntil(tester, () => harness.profiles.profiles.length == 2);
+
+    expect(find.text('成功导入 1 个配置，跳过 1 行无效数据'), findsOneWidget);
+    expect(find.textContaining('第 2 行'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '知道了'));
+    await tester.pumpAndSettle();
+    expect(find.text('长离'), findsWidgets);
+  });
+
+  testWidgets('评分文件复制分享链接，删除后粘贴导入可原样恢复', (tester) async {
+    final harness = await _pumpApp(tester);
+    _mockClipboard(tester);
+    final file = await _seedScoredFile(tester, fileName: '长离-主C');
+
+    // 录一条档位再落盘，恢复后要能看出内容真的被搬回来了。
+    final saved = (await harness.runAsync(() async {
+      harness.workspace.updateEcho(
+        file.id,
+        file.echoAt(0).withTier(SubstatType.critRate, 4),
+      );
+      await harness.workspace.saveFile(harness.workspace.activeFile!);
+      return harness.workspace.activeFile;
+    }))!;
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('复制链接').first);
+    await _settle(tester, dismissSnack: false);
+    expect(find.text('已复制「长离-主C」的分享链接'), findsOneWidget);
+    await _dismissSnackBars(tester);
+
+    final clipboard = await harness.runAsync(
+      () => Clipboard.getData(Clipboard.kTextPlain),
+    );
+    expect(clipboard!.text, startsWith('echoscorer://'));
+    expect(clipboard.text, isNot(contains('长离-主C')));
+
+    // 删掉本地文件，模拟换到一台什么都没有的设备。
+    await harness.runAsync(
+      () => harness.workspace.deleteFile(harness.workspace.activeFile!),
+    );
+    await tester.pumpAndSettle();
+    expect(harness.workspace.openFiles, isEmpty);
+    expect(find.text('长离-主C'), findsNothing);
+
+    await tester.tap(find.byTooltip('粘贴导入').first);
+    await _settleUntil(
+      tester,
+      () => harness.workspace.openFiles.any((item) => item.name == '长离-主C'),
+    );
+
+    expect(find.text('成功导入 1 个评分文件'), findsOneWidget);
+    final restored = harness.workspace.activeFile!;
+    expect(restored.name, saved.name);
+    expect(restored.profileName, saved.profileName);
+    expect(restored.coefficients, saved.coefficients);
+    expect(restored.echoAt(0).tierOf(SubstatType.critRate), 4);
+    expect(restored.echoAt(0).sameContentAs(saved.echoAt(0)), isTrue);
+    expect(harness.workspace.isDirty(restored), isFalse);
+    await _dismissSnackBars(tester);
+  });
+
+  testWidgets('标签页批量导出全部已打开文件，关闭后整批粘贴导入', (tester) async {
+    final harness = await _pumpApp(tester);
+    _mockClipboard(tester);
+    final first = await _seedScoredFile(tester, fileName: '甲文件');
+    await _seedScoredFile(tester, fileName: '乙文件');
+
+    tester.view.physicalSize = const Size(600, 900);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('标签页'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('更多操作').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('复制全部分享链接'));
+    await _settle(tester, dismissSnack: false);
+    expect(find.text('已复制 2 个评分文件的分享链接'), findsOneWidget);
+    await _dismissSnackBars(tester);
+
+    // 剪贴板里是两行分享链接，文件名不以明文出现。
+    final clipboard = await harness.runAsync(
+      () => Clipboard.getData(Clipboard.kTextPlain),
+    );
+    final lines = clipboard!.text!.split('\n');
+    expect(lines, hasLength(2));
+    expect(lines.every((line) => line.startsWith('echoscorer://')), isTrue);
+    expect(clipboard.text, isNot(contains('甲文件')));
+
+    // 删掉全部文件（含磁盘），模拟换到一台什么都没有的设备后整批导入。
+    await harness.runAsync(() async {
+      for (final file in List.of(harness.workspace.openFiles)) {
+        await harness.workspace.deleteFile(file);
+      }
+    });
+    await tester.pumpAndSettle();
+    expect(harness.workspace.openFiles, isEmpty);
+
+    await tester.tap(find.byTooltip('更多操作').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('粘贴导入'));
+    await _settleUntil(tester, () => harness.workspace.openFiles.length == 2);
+
+    expect(find.text('成功导入 2 个评分文件'), findsOneWidget);
+    expect(
+      harness.workspace.openFiles.map((file) => file.name).toSet(),
+      containsAll(<String>['甲文件', '乙文件']),
+    );
+    final restored = harness.workspace.byId(first.id);
+    expect(restored, isNotNull);
+    expect(harness.workspace.isDirty(restored!), isFalse);
+    await _dismissSnackBars(tester);
+  });
+
+  testWidgets('标签页批量删除勾选的评分文件，磁盘上一并移除', (tester) async {
+    final harness = await _pumpApp(tester);
+    await _seedScoredFile(tester, fileName: '保留文件');
+    await _seedScoredFile(tester, fileName: '甲文件');
+    await _seedScoredFile(tester, fileName: '乙文件');
+
+    tester.view.physicalSize = const Size(600, 900);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('标签页'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('更多操作').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('批量删除'));
+    await tester.pumpAndSettle();
+
+    // 一项都没勾时「删除」不可点，勾两项后计数跟着变。
+    expect(find.text('已选 0 项'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '删除'))
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(find.widgetWithText(CheckboxListTile, '甲文件'));
+    await tester.tap(find.widgetWithText(CheckboxListTile, '乙文件'));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 2 项'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, '删除'));
+    await _settleUntil(
+      tester,
+      () => find.text('已删除 2 个评分文件').evaluate().isNotEmpty,
+    );
+
+    expect(find.text('已删除 2 个评分文件'), findsOneWidget);
+    expect(harness.workspace.openFiles.single.name, '保留文件');
+    // 列表页还开着，剩下的那一条仍在。
+    expect(
+      find.descendant(
+        of: find.byType(FileListPage),
+        matching: find.text('保留文件'),
+      ),
+      findsOneWidget,
+    );
+
+    // 磁盘上的文件夹真的没了，不只是从内存列表里摘掉。
+    await harness.runAsync(() => harness.workspace.refreshDisk());
+    await tester.pumpAndSettle();
+    expect(
+      harness.workspace.diskFiles.map((file) => file.name).toList(),
+      <String>['保留文件'],
+    );
+    await _dismissSnackBars(tester);
+  });
+
+  testWidgets('配置页 ⋮ 菜单收拢导入导出，并能批量删除勾选的配置', (tester) async {
+    final harness = await _pumpApp(tester);
+    await harness.runAsync(() async {
+      for (final name in ['01长离', '21守岸人', '卡卡罗']) {
+        await harness.profiles.create(name);
+      }
+    });
+
+    harness.workspace.show(ShellView.profiles);
+    await tester.pumpAndSettle();
+
+    // 原来的两个图标按钮收进 ⋮，菜单项改用文字描述。
+    expect(find.byTooltip('从剪贴板导入配置'), findsNothing);
+    expect(find.byTooltip('复制全部配置到剪贴板'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('profiles-menu')));
+    await tester.pumpAndSettle();
+    expect(find.text('从剪贴板导入配置'), findsOneWidget);
+    expect(find.text('复制全部配置到剪贴板'), findsOneWidget);
+
+    await tester.tap(find.text('批量删除'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CheckboxListTile, '01长离'));
+    await tester.tap(find.widgetWithText(CheckboxListTile, '卡卡罗'));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 2 项'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, '删除'));
+    await _settleUntil(tester, () => harness.profiles.profiles.length == 1);
+    await _drainSnack(tester);
+
+    expect(find.text('已删除 2 个配置'), findsOneWidget);
+    expect(harness.profiles.profiles.single.name, '21守岸人');
+    expect(find.text('01长离'), findsNothing);
+    expect(find.text('卡卡罗'), findsNothing);
+    await _dismissSnackBars(tester);
   });
 }
 
@@ -490,6 +873,14 @@ Future<ScoreFile> _seedScoredFile(
   return file;
 }
 
+/// 打开「编辑角色系数」页头部的 ⋮ 菜单并点其中一项。
+Future<void> _openProfilesMenu(WidgetTester tester, String item) async {
+  await tester.tap(find.byKey(const ValueKey('profiles-menu')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(item));
+  await tester.pump();
+}
+
 /// 让真实 IO 完成、界面刷新，并把 SnackBar 的自动关闭计时器走完。
 ///
 /// 点击处理里的 `await`（保存=解析文件夹+原子写+重扫、选角色=重扫、关闭=保存+关闭）
@@ -497,15 +888,72 @@ Future<ScoreFile> _seedScoredFile(
 /// 里 `exists`/`readJson`/`writeJsonAtomic`，加上 `loadAll` 逐个文件 `list`+读），
 /// 每一步的续体都要「runAsync 放行真实事件循环 + pump 驱动续体」才能推进一格，
 /// 因此这里循环足够多轮，直到整条 IO 链跑完。
-Future<void> _settle(WidgetTester tester) async {
+Future<void> _settle(WidgetTester tester, {bool dismissSnack = true}) async {
   for (var i = 0; i < 24; i++) {
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 15)),
     );
     await tester.pumpAndSettle();
   }
+  if (dismissSnack) await _dismissSnackBars(tester);
+}
+
+/// 一直推进到 [until] 成立，而不是固定轮数。
+///
+/// 批量导入的真实 IO 链比单次保存长得多，固定轮数要么不够、要么多跑到把
+/// SnackBar 的 3 秒自动关闭计时器走完（`pumpAndSettle` 每次推进 100ms 假时间），
+/// 导致「刚弹出的提示」在断言前就消失了。
+Future<void> _settleUntil(WidgetTester tester, bool Function() until) async {
+  for (var i = 0; i < 200 && !until(); i++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 15)),
+    );
+    await tester.pumpAndSettle();
+  }
+  expect(until(), isTrue, reason: '条件在 200 轮内没有达成');
+}
+
+/// 把 SnackBar 的 3 秒自动关闭计时器走完，避免它挡住后续断言。
+Future<void> _dismissSnackBars(WidgetTester tester) async {
   await tester.pump(const Duration(seconds: 4));
   await tester.pumpAndSettle();
+}
+
+/// 只放行真实事件循环 + 少量假时间，让「控制器已 notify → 动作续体弹提示」跑完。
+///
+/// `_settleUntil` 的条件在控制器 notify 的那一刻就成立了，可提示是紧接着的续体里
+/// 才弹的；用 `_settle` 补跑又会把假时钟推过 3 秒，提示自己先消失了。
+Future<void> _drainSnack(WidgetTester tester) async {
+  for (var i = 0; i < 5; i++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 15)),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+
+/// flutter_test 没有内置剪贴板 mock，这里接住 `flutter/platform` 频道上的两个
+/// Clipboard 方法，让「复制 / 粘贴导入」在测试里真的能往返。
+void _mockClipboard(WidgetTester tester, {String initial = ''}) {
+  var stored = initial;
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    SystemChannels.platform,
+    (call) async {
+      switch (call.method) {
+        case 'Clipboard.setData':
+          stored = (call.arguments as Map)['text'] as String? ?? '';
+        case 'Clipboard.getData':
+          return <String, dynamic>{'text': stored};
+      }
+      return null;
+    },
+  );
+  addTearDown(
+    () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      null,
+    ),
+  );
 }
 
 Future<void> _selectTier(

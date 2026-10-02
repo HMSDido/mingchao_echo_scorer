@@ -14,7 +14,7 @@ import '../widgets/page_header.dart';
 /// 「文件存储位置设置」页。
 ///
 /// Windows 允许自由选择目录；Android 受作用域存储限制，只能用应用私有目录，
-/// 跨设备同步靠 JSON 导入导出。
+/// 跨设备同步靠剪贴板分享链接。
 class StorageSettingsPage extends StatelessWidget {
   const StorageSettingsPage({super.key});
 
@@ -106,14 +106,14 @@ class StorageSettingsPage extends StatelessWidget {
           name: 'scores/<文件名>/',
           description: '每个评分文件一个自命名文件夹，内含 score.json',
         ),
-        _StructureLine(name: 'exports/', description: '没有保存对话框时的兜底导出目录'),
         const SizedBox(height: 16),
         Text(
           canChoose
               ? '切换目录后，当前打开的文件会先关闭（有未保存改动的请先保存）。'
                     '原目录里的数据不会被移动或删除，切回去即可继续使用。'
               : 'Android 上应用只能读写自己的私有目录，因此位置固定。'
-                    '需要换设备时用「导出为 JSON」把数据带走，再在新设备上导入。',
+                    '需要换设备时用「复制链接」把分享链接带走，'
+                    '在另一台设备上「粘贴导入」即可。',
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),

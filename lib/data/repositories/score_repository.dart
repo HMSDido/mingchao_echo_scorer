@@ -142,12 +142,8 @@ class ScoreRepository {
     if (await folder.exists()) await folder.delete(recursive: true);
   }
 
-  /// 从导入的 JSON 建立评分文件；文件夹名冲突时自动追加序号。
-  Future<ScoreFile> importFromJson(
-    Map<String, dynamic> json, {
-    String? name,
-  }) async {
-    final parsed = ScoreFile.fromJson(json);
+  /// 把解析好的评分文件落盘为新的一份；文件夹名冲突时自动追加序号。
+  Future<ScoreFile> importScoreFile(ScoreFile parsed, {String? name}) async {
     final desired = name?.trim().isNotEmpty == true
         ? name!.trim()
         : parsed.name;

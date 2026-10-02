@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../core/io/transfer.dart';
 import '../data/models/coefficient_profile.dart';
 import '../data/models/echo_entry.dart';
 import '../data/models/score_file.dart';
+import '../data/models/share_link.dart';
 import '../data/repositories/score_repository.dart';
 import '../data/repositories/settings_repository.dart';
 import '../data/repositories/storage_service.dart';
@@ -274,22 +274,55 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> importScoreJson(Map<String, dynamic> json) async {
-    final imported = await _repo.importFromJson(json);
+  /// 批量从磁盘删除文件并关闭，最后只重扫一次磁盘。
+  ///
+  /// 返回删除失败的条目（坏文件夹不该中断整批）。
+  Future<List<ScoreFile>> deleteFiles(Iterable<ScoreFile> files) async {
+    final failed = <ScoreFile>[];
+    for (final file in files) {
+      try {
+        await _repo.delete(file);
+      } on Exception {
+        failed.add(file);
+        continue;
+      }
+      _open.removeWhere((item) => item.id == file.id);
+      _baseline.remove(file.id);
+      if (_activeId == file.id) _activeId = null;
+    }
+    _activeId ??= _open.isEmpty ? null : _open.first.id;
     await reloadDisk();
-    _addOpen(imported);
-    _activeId = imported.id;
-    _view = ShellView.files;
     unawaited(_persistLastOpen());
     notifyListeners();
+    return failed;
   }
 
-  /// 导出到用户选择的位置，返回写入路径；取消返回 null。
-  Future<String?> exportScoreJson(ScoreFile file) => Transfer.saveJson(
-    suggestedName: file.name,
-    json: file.toJson(),
-    fallbackDir: _storage.exportsDir,
-  );
+  /// 导入剪贴板文本（分享链接或裸 JSON，可多行批量）。
+  ///
+  /// 坏行只记进 failures，其余文件照常落盘并打开；最后统一重扫一次磁盘。
+  Future<ShareImportSummary> importShareText(String raw) async {
+    final parsed = ScoreShare.parse(raw);
+    final failures = List<String>.of(parsed.failures);
+    final imported = <ScoreFile>[];
+    for (final file in parsed.items) {
+      try {
+        imported.add(await _repo.importScoreFile(file));
+      } on Exception catch (error) {
+        failures.add('「${file.name}」：$error');
+      }
+    }
+    await reloadDisk();
+    for (final file in imported) {
+      _addOpen(file);
+    }
+    if (imported.isNotEmpty) {
+      _activeId = imported.last.id;
+      _view = ShellView.files;
+    }
+    unawaited(_persistLastOpen());
+    notifyListeners();
+    return (imported: imported.length, failures: failures);
+  }
 
   // ------------------------------------------------------------------ 守卫
 

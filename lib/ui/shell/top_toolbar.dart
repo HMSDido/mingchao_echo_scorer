@@ -7,7 +7,9 @@ import '../../domain/score_calculator.dart';
 import '../../state/workspace_controller.dart';
 import '../actions/file_actions.dart';
 
-/// 主区域顶部的功能键栏：新建、打开、保存、导入、导出。
+/// 主区域顶部的功能键栏：保存、粘贴导入、复制链接。
+///
+/// 新建 / 打开只在左侧 `FilePanel` 出现一次，这里不再重复。
 class TopToolbar extends StatelessWidget {
   const TopToolbar({this.compact = false, super.key});
 
@@ -31,19 +33,6 @@ class TopToolbar extends StatelessWidget {
           child: Row(
             children: [
               _ToolbarButton(
-                icon: Icons.note_add_outlined,
-                label: '新建',
-                compact: compact,
-                onPressed: () => FileActions.create(context),
-              ),
-              _ToolbarButton(
-                icon: Icons.folder_open,
-                label: '打开',
-                compact: compact,
-                onPressed: () => FileActions.open(context),
-              ),
-              const _Separator(),
-              _ToolbarButton(
                 icon: dirty ? Icons.save : Icons.save_outlined,
                 label: '保存',
                 compact: compact,
@@ -51,16 +40,18 @@ class TopToolbar extends StatelessWidget {
                 onPressed: hasFile ? () => FileActions.save(context) : null,
               ),
               _ToolbarButton(
-                icon: Icons.file_download_outlined,
-                label: '导入',
+                icon: Icons.content_paste_go,
+                label: '粘贴导入',
                 compact: compact,
-                onPressed: () => FileActions.importFile(context),
+                onPressed: () => FileActions.importFromClipboard(context),
               ),
               _ToolbarButton(
-                icon: Icons.file_upload_outlined,
-                label: '导出',
+                icon: Icons.link,
+                label: '复制链接',
                 compact: compact,
-                onPressed: hasFile ? () => FileActions.export(context) : null,
+                onPressed: hasFile
+                    ? () => FileActions.copyShareLink(context)
+                    : null,
               ),
               const Spacer(),
               if (hasFile) _FileStatus(file: file, dirty: dirty),
@@ -120,18 +111,6 @@ class _ToolbarButton extends StatelessWidget {
             ),
     );
   }
-}
-
-class _Separator extends StatelessWidget {
-  const _Separator();
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 1,
-    height: 22,
-    margin: const EdgeInsets.symmetric(horizontal: 8),
-    color: Theme.of(context).colorScheme.outlineVariant,
-  );
 }
 
 class _FileStatus extends StatelessWidget {

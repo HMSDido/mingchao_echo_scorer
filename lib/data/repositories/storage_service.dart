@@ -11,7 +11,6 @@ import 'package:path_provider/path_provider.dart';
 /// <root>/
 ///   profiles/<profileId>.json      角色系数配置
 ///   scores/<用户命名文件夹>/score.json  评分文件
-///   exports/                       无可用保存对话框时的兜底导出目录
 /// ```
 class StorageService {
   StorageService(this._root);
@@ -24,14 +23,11 @@ class StorageService {
 
   Directory get scoresDir => Directory(p.join(_root.path, 'scores'));
 
-  Directory get exportsDir => Directory(p.join(_root.path, 'exports'));
-
   /// 创建全部目录（幂等）。
   Future<void> ensureStructure() async {
     await _root.create(recursive: true);
     await profilesDir.create(recursive: true);
     await scoresDir.create(recursive: true);
-    await exportsDir.create(recursive: true);
   }
 
   /// 切换存储根目录并初始化其结构。

@@ -33,10 +33,13 @@ void main() {
         },
       );
 
+  /// 仓库只接收解析好的配置，JSON 解析交给模型层（见 [CoefficientProfile.fromJson]）。
+  Future<CoefficientProfile> importJson(Map<String, dynamic> json) =>
+      repository.importProfile(CoefficientProfile.fromJson(json));
+
   test('目录结构在初始化时建立', () async {
     expect(await storage.profilesDir.exists(), isTrue);
     expect(await storage.scoresDir.exists(), isTrue);
-    expect(await storage.exportsDir.exists(), isTrue);
   });
 
   test('保存后能原样读回', () async {
@@ -112,7 +115,7 @@ void main() {
   });
 
   test('导入时未知键忽略、缺失键补 0', () async {
-    final imported = await repository.importFromJson({
+    final imported = await importJson({
       'format': 1,
       'id': 'imported-id',
       'name': '外部配置',
@@ -126,7 +129,7 @@ void main() {
 
   test('导入重名配置时追加序号', () async {
     await repository.save(sample('长离'));
-    final imported = await repository.importFromJson(sample('长离').toJson());
+    final imported = await importJson(sample('长离').toJson());
     expect(imported.name, '长离 (2)');
     expect(await repository.loadAll().then((r) => r.items), hasLength(2));
   });
@@ -138,7 +141,7 @@ void main() {
     payload['name'] = '篡改版';
     payload['coefficients'] = {'critRate': 9.0};
 
-    final imported = await repository.importFromJson(payload);
+    final imported = await importJson(payload);
     expect(imported.id, isNot(original.id));
 
     final stillThere = await repository.findById(original.id);
@@ -147,7 +150,7 @@ void main() {
   });
 
   test('导入的 id 无法穿越出 profiles 目录', () async {
-    final imported = await repository.importFromJson({
+    final imported = await importJson({
       'format': 1,
       'id': '../../../../evil',
       'name': '恶意配置',

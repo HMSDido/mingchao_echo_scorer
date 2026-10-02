@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/io/transfer.dart';
 import '../../core/util/file_names.dart';
 import '../../core/util/format.dart';
 import '../../data/models/coefficient_profile.dart';
 import '../../data/models/score_file.dart';
+import '../../data/models/share_link.dart';
 import '../../domain/score_calculator.dart';
 import '../../state/profile_controller.dart';
 import '../../state/workspace_controller.dart';
 import '../widgets/dialogs.dart';
+import 'share_actions.dart';
 
 /// 评分文件的界面级操作：把控制器动作和对话框/提示串起来。
 class FileActions {
@@ -92,32 +93,47 @@ class FileActions {
     }
   }
 
-  static Future<void> importFile(BuildContext context) async {
+  /// 读剪贴板并批量导入评分文件。
+  static Future<void> importFromClipboard(BuildContext context) async {
     final workspace = context.read<WorkspaceController>();
-    try {
-      final json = await Transfer.pickJson();
-      if (json == null || !context.mounted) return;
-      await workspace.importScoreJson(json);
-      if (context.mounted) Dialogs.snack(context, '导入成功');
-    } on Exception catch (error) {
-      if (context.mounted) Dialogs.error(context, error);
-    }
+    await ShareActions.import(
+      context,
+      unit: '评分文件',
+      run: workspace.importShareText,
+    );
   }
 
-  static Future<void> export(BuildContext context, {ScoreFile? target}) async {
+  /// 把文件复制成分享链接（含 5 件声骸的档位与系数快照）。
+  static Future<void> copyShareLink(
+    BuildContext context, {
+    ScoreFile? target,
+  }) async {
     final workspace = context.read<WorkspaceController>();
     final file = target ?? workspace.activeFile;
     if (file == null) {
       Dialogs.snack(context, '没有打开的评分文件');
       return;
     }
-    try {
-      final path = await workspace.exportScoreJson(file);
-      if (!context.mounted) return;
-      Dialogs.snack(context, path == null ? '已取消导出' : '已导出到：$path');
-    } on Exception catch (error) {
-      if (context.mounted) Dialogs.error(context, error);
+    await ShareActions.copy(
+      context,
+      ScoreShare.encode(file),
+      '已复制「${file.name}」的分享链接',
+    );
+  }
+
+  /// 把全部已打开文件编码成分享链接一次复制走（一行一个，对方可整批导入）。
+  static Future<void> copyAllShareLinks(BuildContext context) async {
+    final workspace = context.read<WorkspaceController>();
+    final files = workspace.openFiles;
+    if (files.isEmpty) {
+      Dialogs.snack(context, '没有打开的评分文件');
+      return;
     }
+    await ShareActions.copy(
+      context,
+      ScoreShare.encodeAll(files),
+      '已复制 ${files.length} 个评分文件的分享链接',
+    );
   }
 
   static Future<void> rename(BuildContext context, ScoreFile file) async {
@@ -179,6 +195,54 @@ class FileActions {
     try {
       await workspace.deleteFile(file);
       if (context.mounted) Dialogs.snack(context, '已删除「${file.name}」');
+    } on Exception catch (error) {
+      if (context.mounted) Dialogs.error(context, error);
+    }
+  }
+
+  /// 批量删除：从已打开的文件里勾选多个，连同各自的文件夹一起删掉。
+  static Future<void> deleteMany(BuildContext context) async {
+    final workspace = context.read<WorkspaceController>();
+    final files = workspace.openFiles;
+    if (files.isEmpty) {
+      Dialogs.snack(context, '没有打开的评分文件');
+      return;
+    }
+    final picked = await Dialogs.pickMulti<ScoreFile>(
+      context,
+      title: '批量删除评分文件',
+      items: files,
+      labelBuilder: (file) => file.name,
+      subtitleBuilder: (file) {
+        final score = ScoreCalculator.scoreFile(
+          file.echoes,
+          file.coefficients,
+          critThreshold: file.critThreshold,
+        );
+        final who = file.hasProfile ? file.profileName : '未选择角色';
+        return '${Format.scoreWithUnit(score.totalScore)} '
+            '${Format.rating(score.totalRating)} · $who'
+            '${workspace.isDirty(file) ? ' · 有未保存的改动' : ''}';
+      },
+      hint: '会连同选中的文件夹一起从磁盘上删除，且无法撤销。',
+      emptyMessage: '没有打开的评分文件',
+      confirmLabel: '删除',
+      destructive: true,
+    );
+    if (picked == null || picked.isEmpty || !context.mounted) return;
+    try {
+      final failed = await workspace.deleteFiles(picked);
+      if (!context.mounted) return;
+      final done = picked.length - failed.length;
+      if (failed.isEmpty) {
+        Dialogs.snack(context, '已删除 $done 个评分文件');
+      } else {
+        await Dialogs.alert(
+          context,
+          title: '已删除 $done 个评分文件，${failed.length} 个失败',
+          message: failed.map((file) => '「${file.name}」').join('\n'),
+        );
+      }
     } on Exception catch (error) {
       if (context.mounted) Dialogs.error(context, error);
     }

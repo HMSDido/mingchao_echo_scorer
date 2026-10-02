@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/io/transfer.dart';
 import '../../core/util/file_names.dart';
+import '../../core/util/format.dart';
 import '../../data/models/coefficient_profile.dart';
 import '../../data/models/id_generator.dart';
-import '../../state/app_scope.dart';
+import '../../data/models/share_link.dart';
 import '../../state/profile_controller.dart';
 import '../profiles/profile_editor_page.dart';
 import '../widgets/dialogs.dart';
+import 'share_actions.dart';
 
 /// 角色系数配置的界面级操作。
 class ProfileActions {
@@ -31,7 +32,7 @@ class ProfileActions {
         '新建配置',
         profiles.profiles.map((item) => item.name),
       ),
-      hint: '例如「长离」「守岸人」',
+      hint: '例如「01长离」「21守岸人」（链数+角色名）',
       confirmLabel: '新建',
     );
     if (name == null || !context.mounted) return;
@@ -76,33 +77,70 @@ class ProfileActions {
     }
   }
 
-  static Future<void> importJson(BuildContext context) async {
-    final profiles = context.read<ProfileController>();
-    try {
-      final json = await Transfer.pickJson(dialogTitle: '导入角色系数配置');
-      if (json == null || !context.mounted) return;
-      final imported = await profiles.importJson(json);
-      if (context.mounted) {
-        Dialogs.snack(context, '已导入「${imported.name}」');
-      }
-    } on Exception catch (error) {
-      if (context.mounted) Dialogs.error(context, error);
+  /// 把配置编码成分享链接写进剪贴板；多条按行拼接，一次复制全部。
+  static Future<void> copyToClipboard(
+    BuildContext context,
+    List<CoefficientProfile> profiles,
+  ) async {
+    if (profiles.isEmpty) {
+      Dialogs.snack(context, '没有可复制的配置');
+      return;
     }
+    await ShareActions.copy(
+      context,
+      ProfileShare.encodeAll(profiles),
+      '已复制 ${profiles.length} 个配置到剪贴板',
+    );
   }
 
-  static Future<void> export(
-    BuildContext context,
-    CoefficientProfile profile,
-  ) async {
-    final scope = context.read<AppScope>();
+  /// 读剪贴板并批量导入配置。
+  static Future<void> importFromClipboard(BuildContext context) async {
+    final profiles = context.read<ProfileController>();
+    await ShareActions.import(
+      context,
+      unit: '配置',
+      run: profiles.importShareText,
+    );
+  }
+
+  /// 批量删除配置：勾选多个，一次删掉。
+  static Future<void> deleteMany(BuildContext context) async {
+    final controller = context.read<ProfileController>();
+    final items = controller.profiles;
+    if (items.isEmpty) {
+      Dialogs.snack(context, '没有可删除的配置');
+      return;
+    }
+    final picked = await Dialogs.pickMulti<CoefficientProfile>(
+      context,
+      title: '批量删除配置',
+      items: items,
+      labelBuilder: (profile) => profile.name,
+      subtitleBuilder: (profile) => '更新于 ${Format.dateTime(profile.updatedAt)}',
+      hint:
+          '已经套用这些系数的评分文件不受影响（系数是快照保存的），'
+          '但之后无法再选到它们。此操作无法撤销。',
+      emptyMessage: '还没有角色系数配置',
+      confirmLabel: '删除',
+      destructive: true,
+    );
+    if (picked == null || picked.isEmpty || !context.mounted) return;
     try {
-      final path = await Transfer.saveJson(
-        suggestedName: '${profile.name}-角色系数',
-        json: profile.toJson(),
-        fallbackDir: scope.storage.exportsDir,
-      );
+      final failedIds = await controller.deleteMany(picked);
       if (!context.mounted) return;
-      Dialogs.snack(context, path == null ? '已取消导出' : '已导出到：$path');
+      final failed = picked
+          .where((item) => failedIds.contains(item.id))
+          .toList();
+      final done = picked.length - failed.length;
+      if (failed.isEmpty) {
+        Dialogs.snack(context, '已删除 $done 个配置');
+      } else {
+        await Dialogs.alert(
+          context,
+          title: '已删除 $done 个配置，${failed.length} 个失败',
+          message: failed.map((profile) => '「${profile.name}」').join('\n'),
+        );
+      }
     } on Exception catch (error) {
       if (context.mounted) Dialogs.error(context, error);
     }

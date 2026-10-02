@@ -193,7 +193,9 @@ void main() {
       jsonEncode((await repository.loadAll()).items.single.toJson()),
     ) as Map<String, dynamic>;
     payload['name'] = '原版';
-    final imported = await repository.importFromJson(payload);
+    final imported = await repository.importScoreFile(
+      ScoreFile.fromJson(payload),
+    );
 
     expect(imported.id, isNot(original.id));
     expect(imported.name, '原版 (2)');
@@ -213,7 +215,9 @@ void main() {
     final payload =
         jsonDecode(jsonEncode(file.toJson())) as Map<String, dynamic>;
     payload['name'] = '../../../逃逸';
-    final imported = await repository.importFromJson(payload);
+    final imported = await repository.importScoreFile(
+      ScoreFile.fromJson(payload),
+    );
 
     expect(
       p.dirname(repository.folderOf(imported).path),

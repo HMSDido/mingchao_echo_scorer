@@ -116,12 +116,12 @@ class ProfileRepository {
     if (await file.exists()) await file.delete();
   }
 
-  /// 从导入的 JSON 建立配置；名称冲突时自动追加序号，id 冲突时换新 id。
-  Future<CoefficientProfile> importFromJson(
-    Map<String, dynamic> json, {
+  /// 把解析好的配置落盘为新的一份；名称冲突时自动追加序号，
+  /// id 不合法或已被占用时换新 id。
+  Future<CoefficientProfile> importProfile(
+    CoefficientProfile parsed, {
     String? name,
   }) async {
-    final parsed = CoefficientProfile.fromJson(json);
     final desired = name?.trim().isNotEmpty == true
         ? name!.trim()
         : parsed.name;

@@ -25,6 +25,10 @@ class NavRail extends StatelessWidget {
     _NavItem(ShellView.about, '关于', Icons.info_outline),
   ];
 
+  /// 导航项的中文标题，供窄屏顶栏复用。
+  static String labelOf(ShellView view) =>
+      _views.firstWhere((item) => item.view == view).label;
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsController>();

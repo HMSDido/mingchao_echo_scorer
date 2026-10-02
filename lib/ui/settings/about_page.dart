@@ -42,8 +42,8 @@ class AboutPage extends StatelessWidget {
                 _Line(
                   icon: Icons.swap_horiz,
                   text:
-                      '跨设备同步：用「导出为 JSON」把角色系数配置和评分文件带走，'
-                      '在另一台设备上导入即可。',
+                      '跨设备同步：用「复制链接」把角色系数配置和评分文件的分享链接带走，'
+                      '在另一台设备上「粘贴导入」即可。',
                 ),
               ],
             ),

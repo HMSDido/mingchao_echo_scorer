@@ -187,11 +187,28 @@ class _TotalScore extends StatelessWidget {
 
     return Column(
       children: [
-        Text(
-          file.hasProfile ? '角色：${file.profileName}' : '总分',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              '角色：${file.profileName}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: 2),
+            // 换系数入口贴着当前系数名，切换即换快照、按内容改动计脏。
+            TextButton.icon(
+              key: const ValueKey('swap-profile'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+              ),
+              icon: const Icon(Icons.swap_horiz, size: 16),
+              label: const Text('更换系数'),
+              onPressed: () => FileActions.chooseProfile(context, file),
+            ),
+          ],
         ),
         const SizedBox(height: 4),
         Text.rich(
@@ -451,19 +468,14 @@ class _FileFooter extends StatelessWidget {
           alignment: WrapAlignment.center,
           children: [
             OutlinedButton.icon(
-              icon: const Icon(Icons.swap_horiz),
-              label: Text(file.hasProfile ? '更换角色' : '选择角色'),
-              onPressed: () => FileActions.chooseProfile(context, file),
-            ),
-            OutlinedButton.icon(
               icon: const Icon(Icons.save_outlined),
               label: const Text('保存'),
               onPressed: () => FileActions.save(context, target: file),
             ),
             OutlinedButton.icon(
-              icon: const Icon(Icons.file_upload_outlined),
-              label: const Text('导出'),
-              onPressed: () => FileActions.export(context, target: file),
+              icon: const Icon(Icons.link),
+              label: const Text('复制分享链接'),
+              onPressed: () => FileActions.copyShareLink(context, target: file),
             ),
             OutlinedButton.icon(
               icon: const Icon(Icons.drive_file_rename_outline),

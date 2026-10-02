@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../data/models/coefficient_profile.dart';
+import '../data/models/share_link.dart';
 import '../data/repositories/profile_repository.dart';
 
 /// 角色系数配置的列表状态与增删改查。
@@ -43,11 +44,37 @@ class ProfileController extends ChangeNotifier {
     await reload();
   }
 
-  /// 从导入的 JSON 建立配置。
-  Future<CoefficientProfile> importJson(Map<String, dynamic> json) async {
-    final imported = await _repo.importFromJson(json);
+  /// 批量删除，最后只刷新一次列表；返回删除失败的 id。
+  Future<List<String>> deleteMany(Iterable<CoefficientProfile> profiles) async {
+    final failed = <String>[];
+    for (final profile in profiles) {
+      try {
+        await _repo.delete(profile.id);
+      } on Exception {
+        failed.add(profile.id);
+      }
+    }
     await reload();
-    return imported;
+    return failed;
+  }
+
+  /// 导入剪贴板文本（分享链接或裸 JSON，可多行批量）。
+  ///
+  /// 坏行只记进 failures，其余配置照常逐条落盘，最后统一刷新一次列表。
+  Future<ShareImportSummary> importShareText(String raw) async {
+    final parsed = ProfileShare.parse(raw);
+    final failures = List<String>.of(parsed.failures);
+    var imported = 0;
+    for (final profile in parsed.items) {
+      try {
+        await _repo.importProfile(profile);
+        imported++;
+      } on Exception catch (error) {
+        failures.add('「${profile.name}」：$error');
+      }
+    }
+    await reload();
+    return (imported: imported, failures: failures);
   }
 
   Future<CoefficientProfile> _commit(CoefficientProfile profile) async {

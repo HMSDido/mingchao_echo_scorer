@@ -51,6 +51,29 @@ class Dialogs {
     ),
   );
 
+  /// 单按钮提示框，用于展示多行结果或错误明细（内容可滚动）。
+  static Future<void> alert(
+    BuildContext context, {
+    required String title,
+    required String message,
+    String confirmLabel = '知道了',
+  }) => showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(title),
+      content: SizedBox(
+        width: 380,
+        child: SingleChildScrollView(child: Text(message)),
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: Text(confirmLabel),
+        ),
+      ],
+    ),
+  );
+
   static Future<bool> confirm(
     BuildContext context, {
     required String title,
@@ -124,6 +147,31 @@ class Dialogs {
     return result ?? UnsavedChoice.cancel;
   }
 
+  /// 从若干选项中勾选多项；取消返回 null，确定返回勾选项（至少一项）。
+  static Future<List<T>?> pickMulti<T>(
+    BuildContext context, {
+    required String title,
+    required List<T> items,
+    required String Function(T item) labelBuilder,
+    String Function(T item)? subtitleBuilder,
+    String? hint,
+    String? emptyMessage,
+    String confirmLabel = '确定',
+    bool destructive = false,
+  }) => showDialog<List<T>>(
+    context: context,
+    builder: (dialogContext) => _MultiPickDialog<T>(
+      title: title,
+      items: items,
+      labelBuilder: labelBuilder,
+      subtitleBuilder: subtitleBuilder,
+      hint: hint,
+      emptyMessage: emptyMessage,
+      confirmLabel: confirmLabel,
+      destructive: destructive,
+    ),
+  );
+
   /// 从若干选项中挑一个；取消返回 null。
   static Future<T?> pick<T>(
     BuildContext context, {
@@ -177,6 +225,141 @@ class Dialogs {
       );
     },
   );
+}
+
+/// [Dialogs.pickMulti] 的对话框内容：勾选若干项后一次性返回。
+class _MultiPickDialog<T> extends StatefulWidget {
+  const _MultiPickDialog({
+    required this.title,
+    required this.items,
+    required this.labelBuilder,
+    required this.subtitleBuilder,
+    required this.hint,
+    required this.emptyMessage,
+    required this.confirmLabel,
+    required this.destructive,
+  });
+
+  final String title;
+  final List<T> items;
+  final String Function(T item) labelBuilder;
+  final String Function(T item)? subtitleBuilder;
+  final String? hint;
+  final String? emptyMessage;
+  final String confirmLabel;
+  final bool destructive;
+
+  @override
+  State<_MultiPickDialog<T>> createState() => _MultiPickDialogState<T>();
+}
+
+class _MultiPickDialogState<T> extends State<_MultiPickDialog<T>> {
+  final Set<int> _selected = {};
+
+  void _toggle(int index, bool? checked) {
+    setState(() {
+      if (checked ?? false) {
+        _selected.add(index);
+      } else {
+        _selected.remove(index);
+      }
+    });
+  }
+
+  void _submit() {
+    if (_selected.isEmpty) return;
+    Navigator.of(context)
+        .pop([for (final index in _selected) widget.items[index]]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return AlertDialog(
+      title: Text(widget.title),
+      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+      content: SizedBox(
+        width: 420,
+        child: widget.items.isEmpty
+            ? Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  widget.emptyMessage ?? '暂无可选项',
+                  style: theme.textTheme.bodyMedium,
+                ),
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (widget.hint != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                      child: Text(
+                        widget.hint!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        for (
+                          var index = 0;
+                          index < widget.items.length;
+                          index++
+                        )
+                          CheckboxListTile(
+                            dense: true,
+                            value: _selected.contains(index),
+                            onChanged: (checked) => _toggle(index, checked),
+                            title: Text(
+                              widget.labelBuilder(widget.items[index]),
+                            ),
+                            subtitle: widget.subtitleBuilder == null
+                                ? null
+                                : Text(
+                                    widget.subtitleBuilder!(
+                                      widget.items[index],
+                                    ),
+                                  ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+                    child: Text(
+                      '已选 ${_selected.length} 项',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          style: widget.destructive
+              ? FilledButton.styleFrom(
+                  backgroundColor: theme.colorScheme.error,
+                  foregroundColor: theme.colorScheme.onError,
+                )
+              : null,
+          onPressed: _selected.isEmpty ? null : _submit,
+          child: Text(widget.confirmLabel),
+        ),
+      ],
+    );
+  }
 }
 
 /// [Dialogs.promptText] 的对话框内容。
