@@ -877,6 +877,121 @@ void main() {
     expect(find.text('01长离'), findsOneWidget);
     await _dismissSnackBars(tester);
   });
+
+  testWidgets('文件栏新建分组，拖把手把评分文件移进组，布局落进 prefs', (tester) async {
+    final harness = await _pumpApp(tester);
+    await harness.runAsync(() async {
+      await harness.workspace.createFile('甲文件');
+      await harness.workspace.createFile('乙文件');
+    });
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('新建分组'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      '日常',
+    );
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(FilledButton, '新建'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final panel = find.byType(FilePanel);
+    expect(
+      find.descendant(of: panel, matching: find.text('日常')),
+      findsOneWidget,
+    );
+
+    // 第一行文件的把手一路拖到列表末尾：越过组标题，落进「日常」组。
+    final firstId = harness.workspace.openFiles.first.id;
+    final grip = find
+        .descendant(of: panel, matching: find.byIcon(Icons.drag_indicator))
+        .first;
+    final gesture = await tester.startGesture(tester.getCenter(grip));
+    await tester.pump();
+    for (var i = 0; i < 6; i++) {
+      await gesture.moveBy(const Offset(0, 40));
+      await tester.pump();
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(harness.workspace.layoutGroupMemberIds('日常'), [firstId]);
+    expect(harness.settings.repository.scoreLayoutTokens, contains('g:日常'));
+  });
+
+  testWidgets('删除评分文件分组只删标题，文件释放回根层不被动', (tester) async {
+    final harness = await _pumpApp(tester);
+    final created = (await harness.runAsync(
+      () => harness.workspace.createFile('甲文件'),
+    ))!;
+    expect(harness.workspace.addLayoutGroup('日常'), isTrue);
+    harness.workspace.placeInLayoutGroup('日常', created.id);
+
+    await tester.pumpAndSettle();
+    final panel = find.byType(FilePanel);
+    await tester.tap(
+      find.descendant(
+        of: panel,
+        matching: find.byKey(const ValueKey('file-group-menu-日常')),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除分组（留文件）'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '删除分组'));
+    await tester.pumpAndSettle();
+
+    expect(find.descendant(of: panel, matching: find.text('日常')), findsNothing);
+    expect(harness.workspace.openFiles, hasLength(1));
+    expect(
+      find.descendant(of: panel, matching: find.text('甲文件')),
+      findsOneWidget,
+    );
+    await _dismissSnackBars(tester);
+  });
+
+  testWidgets('窄屏标签页列表同样分组，拖出组标题即回到根层', (tester) async {
+    final harness = await _pumpApp(tester);
+    final created = (await harness.runAsync(
+      () => harness.workspace.createFile('窄屏文件'),
+    ))!;
+    expect(harness.workspace.addLayoutGroup('标签组'), isTrue);
+    harness.workspace.placeInLayoutGroup('标签组', created.id);
+
+    tester.view.physicalSize = const Size(600, 900);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('标签页'));
+    await tester.pumpAndSettle();
+
+    final list = find.byType(FileListPage);
+    expect(
+      find.descendant(of: list, matching: find.text('标签组')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: list, matching: find.text('1 个')),
+      findsOneWidget,
+    );
+
+    // 文件行的把手拖到组标题之上：回到根层，组里没成员了。
+    await tester.drag(
+      find
+          .descendant(of: list, matching: find.byIcon(Icons.drag_indicator))
+          .last,
+      const Offset(0, -200),
+    );
+    await tester.pumpAndSettle();
+
+    expect(harness.workspace.layoutGroupMemberIds('标签组'), isEmpty);
+  });
 }
 
 // ------------------------------------------------------------------ 测试脚手架

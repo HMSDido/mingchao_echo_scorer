@@ -8,7 +8,10 @@ import '../../domain/score_calculator.dart';
 import '../../state/workspace_controller.dart';
 import '../actions/file_actions.dart';
 
-/// 左侧文件栏：已打开的评分文件列表 + 文件名搜索。
+/// 左侧文件栏（宽屏）：已打开评分文件的可分组、可拖拽列表 + 文件名搜索。
+///
+/// 无搜索词时用 [ReorderableListView]：组标题也是可拖的行，
+/// 拖标题整组移动，拖条目即可跨组 / 跨根层移动；搜索时退回扁平过滤列表。
 class FilePanel extends StatefulWidget {
   const FilePanel({super.key});
 
@@ -38,7 +41,9 @@ class _FilePanelState extends State<FilePanel> {
   Widget build(BuildContext context) {
     final workspace = context.watch<WorkspaceController>();
     final theme = Theme.of(context);
+    final searching = workspace.fileQuery.trim().isNotEmpty;
     final files = workspace.visibleOpenFiles;
+    final rows = workspace.layoutRows;
     // 外部（例如快捷键）清空了搜索词时同步输入框。
     if (_search.text != workspace.fileQuery) {
       _search
@@ -71,6 +76,11 @@ class _FilePanelState extends State<FilePanel> {
                   onPressed: () => FileActions.create(context),
                 ),
                 IconButton(
+                  tooltip: '新建分组',
+                  icon: const Icon(Icons.create_new_folder_outlined),
+                  onPressed: () => FileActions.addGroup(context),
+                ),
+                IconButton(
                   tooltip: '打开文件',
                   icon: const Icon(Icons.folder_open),
                   onPressed: () => FileActions.open(context),
@@ -97,16 +107,46 @@ class _FilePanelState extends State<FilePanel> {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: files.isEmpty
+            child: searching
+                ? files.isEmpty
+                      ? _EmptyHint(searching: true, hasOpen: true)
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                          itemCount: files.length,
+                          itemBuilder: (context, index) =>
+                              _FileTile(file: files[index]),
+                        )
+                : rows.isEmpty
                 ? _EmptyHint(
-                    searching: workspace.fileQuery.trim().isNotEmpty,
+                    searching: false,
                     hasOpen: workspace.openFiles.isNotEmpty,
                   )
-                : ListView.builder(
+                : ReorderableListView.builder(
                     padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-                    itemCount: files.length,
-                    itemBuilder: (context, index) =>
-                        _FileTile(file: files[index]),
+                    buildDefaultDragHandles: false,
+                    itemCount: rows.length,
+                    onReorderItem: (oldIndex, newIndex) =>
+                        workspace.moveLayoutRow(oldIndex, newIndex),
+                    itemBuilder: (context, index) {
+                      final row = rows[index];
+                      if (row.isGroup) {
+                        return _GroupTile(
+                          key: ValueKey('g:${row.value}'),
+                          index: index,
+                          name: row.value,
+                          memberCount: _groupSize(rows, index),
+                        );
+                      }
+                      final file = workspace.byId(row.value);
+                      if (file == null) {
+                        return SizedBox.shrink(key: ValueKey('ghost-$index'));
+                      }
+                      return _FileTile(
+                        key: ValueKey('s:${file.id}'),
+                        index: index,
+                        file: file,
+                      );
+                    },
                   ),
           ),
           if (workspace.diskErrors.isNotEmpty)
@@ -117,9 +157,113 @@ class _FilePanelState extends State<FilePanel> {
   }
 }
 
-class _FileTile extends StatelessWidget {
-  const _FileTile({required this.file});
+/// 布局里某个组标题后面的连续条目数（组内文件数）。
+int _groupSize(List<({bool isGroup, String value})> rows, int headerIndex) {
+  var count = 0;
+  for (var i = headerIndex + 1; i < rows.length && !rows[i].isGroup; i++) {
+    count++;
+  }
+  return count;
+}
 
+/// 文件栏里的分组标题行：拖把手（或长按）移动整组，⋮ 承载组管理。
+class _GroupTile extends StatelessWidget {
+  const _GroupTile({
+    super.key,
+    required this.index,
+    required this.name,
+    required this.memberCount,
+  });
+
+  final int index;
+  final String name;
+  final int memberCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ReorderableDelayedDragStartListener(
+      index: index,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Material(
+          color: theme.colorScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(2, 6, 2, 6),
+            child: Row(
+              children: [
+                ReorderableDragStartListener(
+                  index: index,
+                  child: Icon(
+                    Icons.drag_indicator,
+                    size: 16,
+                    color: theme.colorScheme.outline,
+                  ),
+                ),
+                Icon(
+                  Icons.folder_outlined,
+                  size: 15,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(
+                  '$memberCount',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  key: ValueKey('file-group-menu-$name'),
+                  tooltip: '分组管理',
+                  icon: const Icon(Icons.more_vert, size: 18),
+                  padding: EdgeInsets.zero,
+                  onSelected: (value) => _onMenu(context, value),
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'create', child: Text('在组内新建文件')),
+                    PopupMenuItem(value: 'rename', child: Text('重命名分组')),
+                    PopupMenuItem(value: 'clear', child: Text('清空分组（删文件）')),
+                    PopupMenuDivider(),
+                    PopupMenuItem(value: 'delete', child: Text('删除分组（留文件）')),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onMenu(BuildContext context, String value) async {
+    switch (value) {
+      case 'create':
+        await FileActions.create(context, inGroup: name);
+      case 'rename':
+        await FileActions.renameGroup(context, name);
+      case 'clear':
+        await FileActions.clearGroup(context, name);
+      case 'delete':
+        await FileActions.deleteGroup(context, name);
+    }
+  }
+}
+
+class _FileTile extends StatelessWidget {
+  const _FileTile({super.key, this.index, required this.file});
+
+  /// 非空表示这一行处于可拖拽的布局列表中（附带把手）。
+  final int? index;
   final ScoreFile file;
 
   @override
@@ -134,7 +278,7 @@ class _FileTile extends StatelessWidget {
       critThreshold: file.critThreshold,
     );
 
-    return Padding(
+    final tile = Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Material(
         color: active
@@ -145,9 +289,18 @@ class _FileTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
           onTap: () => workspace.select(file.id),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 2, 8),
+            padding: EdgeInsets.fromLTRB(10, 8, index == null ? 2 : 0, 8),
             child: Row(
               children: [
+                if (index != null)
+                  ReorderableDragStartListener(
+                    index: index!,
+                    child: Icon(
+                      Icons.drag_indicator,
+                      size: 16,
+                      color: theme.colorScheme.outline,
+                    ),
+                  ),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -217,6 +370,8 @@ class _FileTile extends StatelessWidget {
         ),
       ),
     );
+    if (index == null) return tile;
+    return ReorderableDelayedDragStartListener(index: index!, child: tile);
   }
 
   Future<void> _onMenu(BuildContext context, String value) async {

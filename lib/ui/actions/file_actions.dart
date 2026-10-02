@@ -16,7 +16,7 @@ import 'share_actions.dart';
 class FileActions {
   const FileActions._();
 
-  static Future<void> create(BuildContext context) async {
+  static Future<void> create(BuildContext context, {String? inGroup}) async {
     final workspace = context.read<WorkspaceController>();
     final name = await Dialogs.promptText(
       context,
@@ -31,11 +31,111 @@ class FileActions {
     );
     if (name == null || !context.mounted) return;
     try {
-      await workspace.createFile(name);
+      await workspace.createFile(name, inGroup: inGroup);
       if (context.mounted) Dialogs.snack(context, '已新建「$name」，请先选择角色');
     } on Exception catch (error) {
       if (context.mounted) Dialogs.error(context, error);
     }
+  }
+
+  // ---------------------------------------------------------------- 分组
+
+  /// 新建分组。
+  static Future<void> addGroup(BuildContext context) async {
+    final workspace = context.read<WorkspaceController>();
+    final name = await Dialogs.promptText(
+      context,
+      title: '新建分组',
+      label: '分组名称',
+      hint: '例如按角色或用途归类',
+      confirmLabel: '新建',
+    );
+    if (name == null || !context.mounted) return;
+    if (name.trim().isEmpty) {
+      Dialogs.snack(context, '分组名称不能为空');
+      return;
+    }
+    if (!workspace.addLayoutGroup(name.trim())) {
+      if (context.mounted) {
+        Dialogs.snack(context, '已存在同名分组「${name.trim()}」');
+      }
+    }
+  }
+
+  /// 重命名分组。
+  static Future<void> renameGroup(BuildContext context, String name) async {
+    final workspace = context.read<WorkspaceController>();
+    final newName = await Dialogs.promptText(
+      context,
+      title: '重命名分组',
+      label: '分组名称',
+      initial: name,
+      confirmLabel: '重命名',
+    );
+    if (newName == null || !context.mounted) return;
+    if (newName.trim().isEmpty) {
+      Dialogs.snack(context, '分组名称不能为空');
+      return;
+    }
+    if (!workspace.renameLayoutGroup(name, newName.trim())) {
+      if (context.mounted) Dialogs.snack(context, '已存在同名分组「$newName」');
+    }
+  }
+
+  /// 清空分组：删除组内全部评分文件（连文件夹），组本身保留。
+  static Future<void> clearGroup(BuildContext context, String name) async {
+    final workspace = context.read<WorkspaceController>();
+    final members = workspace
+        .layoutGroupMemberIds(name)
+        .map(workspace.byId)
+        .nonNulls
+        .toList();
+    if (members.isEmpty) {
+      Dialogs.snack(context, '分组「$name」里没有文件');
+      return;
+    }
+    final ok = await Dialogs.confirm(
+      context,
+      title: '清空分组「$name」？',
+      message:
+          '将删除组内 ${members.length} 个评分文件本身（连同各自的文件夹），'
+          '分组保留。有未保存改动时不再逐个询问，直接丢弃。此操作无法撤销。',
+      confirmLabel: '清空',
+      destructive: true,
+    );
+    if (!ok || !context.mounted) return;
+    try {
+      final failed = await workspace.deleteFiles(members);
+      if (!context.mounted) return;
+      final done = members.length - failed.length;
+      Dialogs.snack(
+        context,
+        failed.isEmpty
+            ? '已清空分组「$name」（删除 $done 个文件）'
+            : '已删除 $done 个文件，${failed.length} 个失败',
+      );
+    } on Exception catch (error) {
+      if (context.mounted) Dialogs.error(context, error);
+    }
+  }
+
+  /// 删除分组本身：组内文件不删，释放到根层。
+  static Future<void> deleteGroup(BuildContext context, String name) async {
+    final workspace = context.read<WorkspaceController>();
+    final count = workspace.layoutGroupMemberIds(name).length;
+    final ok = await Dialogs.confirm(
+      context,
+      title: '删除分组「$name」？',
+      message: count == 0
+          ? '分组是空的，删除后不影响任何文件。'
+          : '只删除分组本身，组内 $count 个文件不会被删除，'
+                '而是释放到列表顶部（根层）。',
+      confirmLabel: '删除分组',
+      destructive: true,
+    );
+    if (!ok || !context.mounted) return;
+    workspace.deleteLayoutGroup(name);
+    if (context.mounted) Dialogs.snack(context, '已删除分组「$name」');
   }
 
   /// 从磁盘上尚未打开的文件里挑一个打开。

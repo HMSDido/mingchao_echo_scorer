@@ -9,6 +9,7 @@ import '../data/models/share_link.dart';
 import '../data/repositories/score_repository.dart';
 import '../data/repositories/settings_repository.dart';
 import '../data/repositories/storage_service.dart';
+import 'library_layout.dart';
 
 /// 主区域当前显示的页面。
 enum ShellView { files, profiles, settings, storage, theme, about }
@@ -23,11 +24,17 @@ typedef LeaveGuard = Future<bool> Function();
 /// 脏检查基于「与最近一次落盘内容的语义比较」，因此改了又改回去不算脏，
 /// 关闭时不会打扰用户（对应需求「没有改动直接关闭则不提醒，类似 Word」）。
 class WorkspaceController extends ChangeNotifier {
-  WorkspaceController(this._repo, this._storage, this._settings);
+  WorkspaceController(this._repo, this._storage, SettingsRepository settings)
+    : _settings = settings,
+      _layout = LibraryLayout(
+        idPrefix: 's:',
+        tokens: settings.scoreLayoutTokens,
+      );
 
   final ScoreRepository _repo;
   final StorageService _storage;
   final SettingsRepository _settings;
+  final LibraryLayout _layout;
 
   final List<LeaveGuard> _guards = [];
 
@@ -64,6 +71,61 @@ class WorkspaceController extends ChangeNotifier {
         .where((file) => file.name.toLowerCase().contains(query))
         .toList(growable: false);
   }
+
+  // ---------------------------------------------------------------- 分组布局
+
+  /// 展示用的布局行：组标题与文件 id 混排，未收录的新文件补在根层末尾。
+  ///
+  /// 搜索时界面退回 [visibleOpenFiles] 的扁平列表，不走这里。
+  List<LayoutNode> get layoutRows =>
+      _layout.viewWith([for (final file in _open) file.id]);
+
+  /// 组内的文件 id（清空组时用）。
+  List<String> layoutGroupMemberIds(String name) =>
+      _layout.groupMemberIds(name);
+
+  void moveLayoutRow(int oldIndex, int newIndex) {
+    _syncLayout();
+    _layout.moveNode(oldIndex, newIndex);
+    _persistLayout();
+    notifyListeners();
+  }
+
+  bool addLayoutGroup(String name) {
+    _syncLayout();
+    if (!_layout.addGroup(name)) return false;
+    _persistLayout();
+    notifyListeners();
+    return true;
+  }
+
+  bool renameLayoutGroup(String name, String newName) {
+    _syncLayout();
+    if (!_layout.renameGroup(name, newName)) return false;
+    _persistLayout();
+    notifyListeners();
+    return true;
+  }
+
+  /// 删除分组本身：组内文件不删，释放到根层。
+  void deleteLayoutGroup(String name) {
+    _syncLayout();
+    _layout.deleteGroup(name);
+    _persistLayout();
+    notifyListeners();
+  }
+
+  /// 把文件放进指定分组（组内新建时用）。
+  void placeInLayoutGroup(String name, String fileId) {
+    _syncLayout();
+    _layout.insertIntoGroup(name, fileId);
+    _persistLayout();
+    notifyListeners();
+  }
+
+  void _syncLayout() => _layout.mergeWith([for (final file in _open) file.id]);
+
+  void _persistLayout() => _settings.setScoreLayoutTokens(_layout.tokens);
 
   ScoreFile? get activeFile => byId(_activeId);
 
@@ -168,10 +230,14 @@ class WorkspaceController extends ChangeNotifier {
   // -------------------------------------------------------------- 文件操作
 
   /// 新建评分文件：立即落盘并打开，随后由总览页引导「选择角色」。
-  Future<ScoreFile> createFile(String name) async {
+  ///
+  /// [inGroup] 非空时，新文件直接插进该分组的组头下。
+  Future<ScoreFile> createFile(String name, {String? inGroup}) async {
     final created = await _repo.save(ScoreFile.empty(name: name));
     await reloadDisk();
     _addOpen(created);
+    if (inGroup != null) _layout.insertIntoGroup(inGroup, created.id);
+    _persistLayout();
     _activeId = created.id;
     _view = ShellView.files;
     unawaited(_persistLastOpen());

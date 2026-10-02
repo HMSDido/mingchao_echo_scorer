@@ -12,6 +12,9 @@ import '../actions/file_actions.dart';
 /// 桌面端仍用侧边文件栏；窄屏把「切到哪个文件」收到这一页里，
 /// 点一行即切换并返回列表，行尾直接放分享 / 重命名 / 删除三个常用操作，
 /// 其余动作收进本页顶栏的 ⋮ 菜单，避免在主界面堆一整排功能键。
+///
+/// 与宽屏文件栏共用一套分组布局：无搜索词时是可拖拽的分组列表，
+/// 搜索时退回扁平过滤结果。
 class FileListPage extends StatefulWidget {
   const FileListPage({super.key});
 
@@ -62,6 +65,8 @@ class _FileListPageState extends State<FileListPage> {
             tooltip: '更多操作',
             onSelected: (value) {
               switch (value) {
+                case 'newGroup':
+                  FileActions.addGroup(context);
                 case 'open':
                   FileActions.open(context);
                 case 'import':
@@ -73,6 +78,7 @@ class _FileListPageState extends State<FileListPage> {
               }
             },
             itemBuilder: (context) => const [
+              PopupMenuItem(value: 'newGroup', child: Text('新建分组')),
               PopupMenuItem(value: 'open', child: Text('打开已有文件')),
               PopupMenuItem(value: 'import', child: Text('粘贴导入')),
               PopupMenuItem(value: 'copyAll', child: Text('复制全部分享链接')),
@@ -102,17 +108,53 @@ class _FileListPageState extends State<FileListPage> {
             ),
           ),
           Expanded(
-            child: files.isEmpty
-                ? _EmptyState(
-                    searching: workspace.fileQuery.trim().isNotEmpty,
-                    hasOpen: workspace.openFiles.isNotEmpty,
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
-                    itemCount: files.length,
-                    itemBuilder: (context, index) =>
-                        _FileRow(file: files[index]),
-                  ),
+            child: () {
+              final searching = workspace.fileQuery.trim().isNotEmpty;
+              if (searching) {
+                return files.isEmpty
+                    ? const _EmptyState(searching: true, hasOpen: true)
+                    : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+                        itemCount: files.length,
+                        itemBuilder: (context, index) =>
+                            _FileRow(file: files[index]),
+                      );
+              }
+              final rows = workspace.layoutRows;
+              if (rows.isEmpty) {
+                return _EmptyState(
+                  searching: false,
+                  hasOpen: workspace.openFiles.isNotEmpty,
+                );
+              }
+              return ReorderableListView.builder(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+                buildDefaultDragHandles: false,
+                itemCount: rows.length,
+                onReorderItem: (oldIndex, newIndex) =>
+                    workspace.moveLayoutRow(oldIndex, newIndex),
+                itemBuilder: (context, index) {
+                  final row = rows[index];
+                  if (row.isGroup) {
+                    return _GroupRow(
+                      key: ValueKey('g:${row.value}'),
+                      index: index,
+                      name: row.value,
+                      memberCount: _groupSize(rows, index),
+                    );
+                  }
+                  final file = workspace.byId(row.value);
+                  if (file == null) {
+                    return SizedBox.shrink(key: ValueKey('ghost-$index'));
+                  }
+                  return _FileRow(
+                    key: ValueKey('s:${file.id}'),
+                    index: index,
+                    file: file,
+                  );
+                },
+              );
+            }(),
           ),
           if (workspace.diskErrors.isNotEmpty)
             _ErrorBanner(messages: workspace.diskErrors),
@@ -122,9 +164,113 @@ class _FileListPageState extends State<FileListPage> {
   }
 }
 
-class _FileRow extends StatelessWidget {
-  const _FileRow({required this.file});
+/// 布局里某个组标题后面的连续条目数（组内文件数）。
+int _groupSize(List<({bool isGroup, String value})> rows, int headerIndex) {
+  var count = 0;
+  for (var i = headerIndex + 1; i < rows.length && !rows[i].isGroup; i++) {
+    count++;
+  }
+  return count;
+}
 
+/// 窄屏列表的分组标题行：拖把手 / 长按移动整组，⋮ 承载组管理操作。
+class _GroupRow extends StatelessWidget {
+  const _GroupRow({
+    super.key,
+    required this.index,
+    required this.name,
+    required this.memberCount,
+  });
+
+  final int index;
+  final String name;
+  final int memberCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ReorderableDelayedDragStartListener(
+      index: index,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Material(
+          color: theme.colorScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(2, 8, 2, 8),
+            child: Row(
+              children: [
+                ReorderableDragStartListener(
+                  index: index,
+                  child: Icon(
+                    Icons.drag_indicator,
+                    size: 18,
+                    color: theme.colorScheme.outline,
+                  ),
+                ),
+                Icon(
+                  Icons.folder_outlined,
+                  size: 17,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(
+                  '$memberCount 个',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  key: ValueKey('file-group-menu-$name'),
+                  tooltip: '分组管理',
+                  icon: const Icon(Icons.more_vert, size: 18),
+                  padding: EdgeInsets.zero,
+                  onSelected: (value) => _onMenu(context, value),
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'create', child: Text('在组内新建文件')),
+                    PopupMenuItem(value: 'rename', child: Text('重命名分组')),
+                    PopupMenuItem(value: 'clear', child: Text('清空分组（删文件）')),
+                    PopupMenuDivider(),
+                    PopupMenuItem(value: 'delete', child: Text('删除分组（留文件）')),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onMenu(BuildContext context, String value) async {
+    switch (value) {
+      case 'create':
+        await FileActions.create(context, inGroup: name);
+      case 'rename':
+        await FileActions.renameGroup(context, name);
+      case 'clear':
+        await FileActions.clearGroup(context, name);
+      case 'delete':
+        await FileActions.deleteGroup(context, name);
+    }
+  }
+}
+
+class _FileRow extends StatelessWidget {
+  const _FileRow({super.key, this.index, required this.file});
+
+  /// 在可拖拽布局中的行下标；null 表示搜索过滤后的扁平列表（不可拖）。
+  final int? index;
   final ScoreFile file;
 
   @override
@@ -139,7 +285,7 @@ class _FileRow extends StatelessWidget {
       critThreshold: file.critThreshold,
     );
 
-    return Padding(
+    final row = Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Material(
         color: active
@@ -156,6 +302,18 @@ class _FileRow extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
             child: Row(
               children: [
+                if (index != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: ReorderableDragStartListener(
+                      index: index!,
+                      child: Icon(
+                        Icons.drag_indicator,
+                        size: 18,
+                        color: theme.colorScheme.outline,
+                      ),
+                    ),
+                  ),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -230,6 +388,8 @@ class _FileRow extends StatelessWidget {
         ),
       ),
     );
+    if (index == null) return row;
+    return ReorderableDelayedDragStartListener(index: index!, child: row);
   }
 }
 
