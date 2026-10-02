@@ -26,7 +26,10 @@ Future<void> main() async {
     await StorageService.resolveRoot(settings.customStorageRoot),
   );
 
-  final profiles = ProfileController(ProfileRepository(storage));
+  final profiles = ProfileController(
+    ProfileRepository(storage),
+    layoutStore: settings.repository,
+  );
   final workspace = WorkspaceController(
     ScoreRepository(storage),
     storage,

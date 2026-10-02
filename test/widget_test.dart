@@ -751,6 +751,132 @@ void main() {
     expect(find.text('卡卡罗'), findsNothing);
     await _dismissSnackBars(tester);
   });
+
+  testWidgets('配置页新建分组，拖把手把配置移进组，布局落进 prefs', (tester) async {
+    final harness = await _pumpApp(tester);
+    await harness.runAsync(() async {
+      await harness.profiles.create('01长离');
+      await harness.profiles.create('21守岸人');
+    });
+
+    harness.workspace.show(ShellView.profiles);
+    await tester.pumpAndSettle();
+
+    await _openProfilesMenu(tester, '新建分组');
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      '绯雪',
+    );
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(FilledButton, '新建'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('绯雪'), findsOneWidget);
+
+    // 第一行配置的把手一路拖到列表末尾：越过组标题，落进「绯雪」组内。
+    final firstRowId = harness.profiles.profiles.first.id;
+    await tester.drag(
+      find.byIcon(Icons.drag_indicator).first,
+      const Offset(0, 300),
+    );
+    await tester.pumpAndSettle();
+
+    expect(harness.profiles.layoutGroupMemberIds('绯雪'), [firstRowId]);
+    expect(harness.settings.repository.profileLayoutTokens, contains('g:绯雪'));
+  });
+
+  testWidgets('组内新建的配置直接落在该组组头下', (tester) async {
+    final harness = await _pumpApp(tester);
+    expect(harness.profiles.addLayoutGroup('绯雪'), isTrue);
+
+    harness.workspace.show(ShellView.profiles);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('group-menu-绯雪')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('在组内新建配置'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      '01绯雪',
+    );
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(FilledButton, '新建'),
+      ),
+    );
+    await _settleUntil(tester, () => harness.profiles.profiles.length == 1);
+
+    // 新建后会打开编辑器，退出编辑器回到列表。
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.pumpAndSettle();
+
+    expect(harness.profiles.layoutGroupMemberIds('绯雪'), hasLength(1));
+    expect(find.text('1 个'), findsOneWidget);
+    expect(find.text('01绯雪'), findsOneWidget);
+    await _dismissSnackBars(tester);
+  });
+
+  testWidgets('清空分组删除组内配置，但分组本身保留', (tester) async {
+    final harness = await _pumpApp(tester);
+    final created = (await harness.runAsync(
+      () => harness.profiles.create('01长离'),
+    ))!;
+    expect(harness.profiles.addLayoutGroup('绯雪'), isTrue);
+    harness.profiles.placeInLayoutGroup('绯雪', created.id);
+
+    harness.workspace.show(ShellView.profiles);
+    await tester.pumpAndSettle();
+    expect(find.text('1 个'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('group-menu-绯雪')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('清空分组（删配置）'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '清空'));
+    await _settleUntil(tester, () => harness.profiles.profiles.isEmpty);
+
+    expect(find.text('绯雪'), findsOneWidget);
+    expect(find.text('0 个'), findsOneWidget);
+    expect(find.text('01长离'), findsNothing);
+    await _dismissSnackBars(tester);
+  });
+
+  testWidgets('删除分组只删标题，组内配置释放回根层不被动', (tester) async {
+    final harness = await _pumpApp(tester);
+    final created = (await harness.runAsync(
+      () => harness.profiles.create('01长离'),
+    ))!;
+    expect(harness.profiles.addLayoutGroup('绯雪'), isTrue);
+    harness.profiles.placeInLayoutGroup('绯雪', created.id);
+
+    harness.workspace.show(ShellView.profiles);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('group-menu-绯雪')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除分组（留配置）'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '删除分组'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('绯雪'), findsNothing);
+    expect(harness.profiles.layoutRows.any((row) => row.isGroup), isFalse);
+    expect(harness.profiles.profiles, hasLength(1));
+    expect(find.text('01长离'), findsOneWidget);
+    await _dismissSnackBars(tester);
+  });
 }
 
 // ------------------------------------------------------------------ 测试脚手架
@@ -794,7 +920,10 @@ Future<_Harness> _pumpApp(WidgetTester tester) async {
     final storage = StorageService(root);
     await storage.ensureStructure();
     final repository = ScoreRepository(storage);
-    final profiles = ProfileController(ProfileRepository(storage));
+    final profiles = ProfileController(
+      ProfileRepository(storage),
+      layoutStore: settings.repository,
+    );
     final workspace = WorkspaceController(
       repository,
       storage,

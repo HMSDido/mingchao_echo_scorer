@@ -22,7 +22,7 @@ class ProfileActions {
         ),
       );
 
-  static Future<void> create(BuildContext context) async {
+  static Future<void> create(BuildContext context, {String? inGroup}) async {
     final profiles = context.read<ProfileController>();
     final name = await Dialogs.promptText(
       context,
@@ -38,10 +38,111 @@ class ProfileActions {
     if (name == null || !context.mounted) return;
     try {
       final created = await profiles.create(name);
+      if (inGroup != null) profiles.placeInLayoutGroup(inGroup, created.id);
       if (context.mounted) await edit(context, created);
     } on Exception catch (error) {
       if (context.mounted) Dialogs.error(context, error);
     }
+  }
+
+  // ---------------------------------------------------------------- 分组
+
+  /// 重命名分组；撞名或非法名时提示不落库。
+  static Future<void> renameGroup(BuildContext context, String name) async {
+    final profiles = context.read<ProfileController>();
+    final newName = await Dialogs.promptText(
+      context,
+      title: '重命名分组',
+      label: '分组名称',
+      initial: name,
+      confirmLabel: '重命名',
+    );
+    if (newName == null || !context.mounted) return;
+    if (newName.trim().isEmpty) {
+      Dialogs.snack(context, '分组名称不能为空');
+      return;
+    }
+    if (!profiles.renameLayoutGroup(name, newName.trim())) {
+      if (context.mounted) Dialogs.snack(context, '已存在同名分组「$newName」');
+    }
+  }
+
+  /// 新建分组。
+  static Future<void> addGroup(BuildContext context) async {
+    final profiles = context.read<ProfileController>();
+    final name = await Dialogs.promptText(
+      context,
+      title: '新建分组',
+      label: '分组名称',
+      hint: '例如按角色归类：「绯雪」「忌炎」',
+      confirmLabel: '新建',
+    );
+    if (name == null || !context.mounted) return;
+    if (name.trim().isEmpty) {
+      Dialogs.snack(context, '分组名称不能为空');
+      return;
+    }
+    if (!profiles.addLayoutGroup(name.trim())) {
+      if (context.mounted) Dialogs.snack(context, '已存在同名分组「${name.trim()}」');
+    }
+  }
+
+  /// 清空分组：删除组内全部配置文件，组本身保留。
+  static Future<void> clearGroup(BuildContext context, String name) async {
+    final profiles = context.read<ProfileController>();
+    final members = profiles
+        .layoutGroupMemberIds(name)
+        .map(profiles.byId)
+        .nonNulls
+        .toList();
+    if (members.isEmpty) {
+      Dialogs.snack(context, '分组「$name」里没有配置');
+      return;
+    }
+    if (context.mounted) {
+      final ok = await Dialogs.confirm(
+        context,
+        title: '清空分组「$name」？',
+        message:
+            '将删除组内 ${members.length} 个配置文件本身，分组保留。'
+            '已套用这些系数的评分文件不受影响（系数是快照保存的）。此操作无法撤销。',
+        confirmLabel: '清空',
+        destructive: true,
+      );
+      if (!ok || !context.mounted) return;
+    }
+    try {
+      final failedIds = await profiles.deleteMany(members);
+      if (!context.mounted) return;
+      final done = members.length - failedIds.length;
+      Dialogs.snack(
+        context,
+        failedIds.isEmpty
+            ? '已清空分组「$name」（删除 $done 个配置）'
+            : '已删除 $done 个配置，${failedIds.length} 个失败',
+      );
+    } on Exception catch (error) {
+      if (context.mounted) Dialogs.error(context, error);
+    }
+  }
+
+  /// 删除分组本身：组内配置不删，释放到根层。
+  static Future<void> deleteGroup(BuildContext context, String name) async {
+    final profiles = context.read<ProfileController>();
+    final count = profiles.layoutGroupMemberIds(name).length;
+    final ok = await Dialogs.confirm(
+      context,
+      title: '删除分组「$name」？',
+      message: count == 0
+          ? '分组是空的，删除后不影响任何配置。'
+          : '只删除分组本身，组内 $count 个配置不会被删除，'
+                '而是释放到列表顶部（根层）。',
+      confirmLabel: '删除分组',
+      destructive: true,
+    );
+    if (!ok || !context.mounted) return;
+    profiles.deleteLayoutGroup(name);
+    if (context.mounted) Dialogs.snack(context, '已删除分组「$name」');
   }
 
   /// 以现有配置为模板复制一份（系数照搬，名字另取）。

@@ -9,8 +9,12 @@ import '../../domain/score_calculator.dart';
 import '../../state/profile_controller.dart';
 import '../actions/profile_actions.dart';
 import '../widgets/dialogs.dart';
+import '../../state/library_layout.dart';
 
-/// 「编辑角色系数」页：配置列表 + 新建按钮 + ⋮ 菜单（导入 / 导出 / 批量删除）。
+/// 「编辑角色系数」页：可分组、可拖拽的配置列表 + 新建按钮 + ⋮ 菜单。
+///
+/// 列表用 [ReorderableListView]：组标题也是可拖的行，拖标题整组移动，
+/// 拖条目即可跨组 / 跨根层移动；宽窄屏共用这一份实现。
 class ProfileListPage extends StatefulWidget {
   const ProfileListPage({super.key});
 
@@ -32,6 +36,7 @@ class _ProfileListPageState extends State<ProfileListPage> {
   Widget build(BuildContext context) {
     final controller = context.watch<ProfileController>();
     final theme = Theme.of(context);
+    final rows = controller.layoutRows;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -64,6 +69,8 @@ class _ProfileListPageState extends State<ProfileListPage> {
                 tooltip: '更多操作',
                 onSelected: (value) {
                   switch (value) {
+                    case 'newGroup':
+                      ProfileActions.addGroup(context);
                     case 'import':
                       ProfileActions.importFromClipboard(context);
                     case 'copyAll':
@@ -76,6 +83,7 @@ class _ProfileListPageState extends State<ProfileListPage> {
                   }
                 },
                 itemBuilder: (context) => const [
+                  PopupMenuItem(value: 'newGroup', child: Text('新建分组')),
                   PopupMenuItem(value: 'import', child: Text('从剪贴板导入配置')),
                   PopupMenuItem(value: 'copyAll', child: Text('复制全部配置到剪贴板')),
                   PopupMenuItem(value: 'deleteMany', child: Text('批量删除')),
@@ -91,7 +99,7 @@ class _ProfileListPageState extends State<ProfileListPage> {
           ),
         ),
         const _ShareBanner(),
-        if (controller.profiles.isEmpty)
+        if (rows.isEmpty)
           Expanded(
             child: Center(
               child: Padding(
@@ -122,12 +130,32 @@ class _ProfileListPageState extends State<ProfileListPage> {
           )
         else
           Expanded(
-            child: ListView.separated(
+            child: ReorderableListView.builder(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-              itemCount: controller.profiles.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 8),
-              itemBuilder: (context, index) =>
-                  _ProfileTile(profile: controller.profiles[index]),
+              buildDefaultDragHandles: false,
+              itemCount: rows.length,
+              onReorderItem: (oldIndex, newIndex) =>
+                  controller.moveLayoutRow(oldIndex, newIndex),
+              itemBuilder: (context, index) {
+                final row = rows[index];
+                if (row.isGroup) {
+                  return _GroupTile(
+                    key: ValueKey('g:${row.value}'),
+                    index: index,
+                    name: row.value,
+                    memberCount: _groupSize(rows, index),
+                  );
+                }
+                final profile = controller.byId(row.value);
+                if (profile == null) {
+                  return SizedBox.shrink(key: ValueKey('ghost-$index'));
+                }
+                return _ProfileTile(
+                  key: ValueKey('p:${profile.id}'),
+                  index: index,
+                  profile: profile,
+                );
+              },
             ),
           ),
         if (controller.errors.isNotEmpty)
@@ -146,9 +174,113 @@ class _ProfileListPageState extends State<ProfileListPage> {
   }
 }
 
-class _ProfileTile extends StatelessWidget {
-  const _ProfileTile({required this.profile});
+/// 布局里某个组标题后面的连续条目数（组内配置数）。
+int _groupSize(List<LayoutNode> rows, int headerIndex) {
+  var count = 0;
+  for (var i = headerIndex + 1; i < rows.length && !rows[i].isGroup; i++) {
+    count++;
+  }
+  return count;
+}
 
+/// 分组标题行：整组可拖（拖把手，或触屏长按），⋮ 承载组管理操作。
+class _GroupTile extends StatelessWidget {
+  const _GroupTile({
+    super.key,
+    required this.index,
+    required this.name,
+    required this.memberCount,
+  });
+
+  final int index;
+  final String name;
+  final int memberCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: ReorderableDelayedDragStartListener(
+        index: index,
+        child: Material(
+          color: theme.colorScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(2, 8, 2, 8),
+            child: Row(
+              children: [
+                ReorderableDragStartListener(
+                  index: index,
+                  child: Icon(
+                    Icons.drag_indicator,
+                    size: 20,
+                    color: theme.colorScheme.outline,
+                  ),
+                ),
+                Icon(
+                  Icons.folder_outlined,
+                  size: 18,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(
+                  '$memberCount 个',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  key: ValueKey('group-menu-$name'),
+                  tooltip: '分组管理',
+                  icon: const Icon(Icons.more_vert, size: 18),
+                  padding: EdgeInsets.zero,
+                  onSelected: (value) => _onMenu(context, value),
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'create', child: Text('在组内新建配置')),
+                    PopupMenuItem(value: 'rename', child: Text('重命名分组')),
+                    PopupMenuItem(value: 'clear', child: Text('清空分组（删配置）')),
+                    PopupMenuDivider(),
+                    PopupMenuItem(value: 'delete', child: Text('删除分组（留配置）')),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onMenu(BuildContext context, String value) async {
+    switch (value) {
+      case 'create':
+        await ProfileActions.create(context, inGroup: name);
+      case 'rename':
+        await ProfileActions.renameGroup(context, name);
+      case 'clear':
+        await ProfileActions.clearGroup(context, name);
+      case 'delete':
+        await ProfileActions.deleteGroup(context, name);
+    }
+  }
+}
+
+/// 配置行：点击进编辑器，⋮ 承载单配置操作；把手（或长按）拖动排序。
+class _ProfileTile extends StatelessWidget {
+  const _ProfileTile({super.key, required this.index, required this.profile});
+
+  final int index;
   final CoefficientProfile profile;
 
   @override
@@ -159,66 +291,78 @@ class _ProfileTile extends StatelessWidget {
     );
     final filled = profile.coefficients.values.where((v) => v > 0).length;
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.all(Radius.circular(12)),
-      ),
-      child: InkWell(
-        onTap: () => ProfileActions.edit(context, profile),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      profile.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
+    return ReorderableDelayedDragStartListener(
+      index: index,
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 8),
+        clipBehavior: Clip.antiAlias,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+        child: InkWell(
+          onTap: () => ProfileActions.edit(context, profile),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(4, 12, 4, 12),
+            child: Row(
+              children: [
+                ReorderableDragStartListener(
+                  index: index,
+                  child: Icon(
+                    Icons.drag_indicator,
+                    size: 20,
+                    color: theme.colorScheme.outline,
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        profile.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      profile.isAllZero
-                          ? '全部系数为 0，尚未配置'
-                          : '已设置 $filled/13 项 · 单件理论最高 '
-                                '${Format.score(echoMax)}分 · 五件合计 '
-                                '${Format.score(echoMax * 5)}分',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: profile.isAllZero
-                            ? theme.colorScheme.error
-                            : theme.colorScheme.onSurfaceVariant,
+                      const SizedBox(height: 3),
+                      Text(
+                        profile.isAllZero
+                            ? '全部系数为 0，尚未配置'
+                            : '已设置 $filled/13 项 · 单件理论最高 '
+                                  '${Format.score(echoMax)}分 · 五件合计 '
+                                  '${Format.score(echoMax * 5)}分',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: profile.isAllZero
+                              ? theme.colorScheme.error
+                              : theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '更新于 ${Format.dateTime(profile.updatedAt)}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.outline,
-                        fontSize: 11,
+                      const SizedBox(height: 2),
+                      Text(
+                        '更新于 ${Format.dateTime(profile.updatedAt)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                          fontSize: 11,
+                        ),
                       ),
-                    ),
+                    ],
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: '更多操作',
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: (value) => _onMenu(context, value),
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'edit', child: Text('编辑系数')),
+                    PopupMenuItem(value: 'duplicate', child: Text('复制为新配置')),
+                    PopupMenuItem(value: 'copy', child: Text('复制分享链接')),
+                    PopupMenuDivider(),
+                    PopupMenuItem(value: 'delete', child: Text('删除配置')),
                   ],
                 ),
-              ),
-              PopupMenuButton<String>(
-                tooltip: '更多操作',
-                icon: const Icon(Icons.more_vert),
-                onSelected: (value) => _onMenu(context, value),
-                itemBuilder: (context) => const [
-                  PopupMenuItem(value: 'edit', child: Text('编辑系数')),
-                  PopupMenuItem(value: 'duplicate', child: Text('复制为新配置')),
-                  PopupMenuItem(value: 'copy', child: Text('复制分享链接')),
-                  PopupMenuDivider(),
-                  PopupMenuItem(value: 'delete', child: Text('删除配置')),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
