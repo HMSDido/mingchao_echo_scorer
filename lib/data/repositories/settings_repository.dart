@@ -28,6 +28,8 @@ class SettingsRepository {
   static const String _kBackgroundImage = 'theme.backgroundImage';
   static const String _kNavExpanded = 'ui.navExpanded';
   static const String _kLastOpenIds = 'workspace.lastOpenIds';
+  static const String _kProfileLayout = 'library.profileLayout';
+  static const String _kScoreLayout = 'library.scoreLayout';
 
   /// 默认主题种子色（深紫，与 Flutter 模板一致）。
   static const int defaultSeedColor = 0xFF6750A4;
@@ -81,4 +83,18 @@ class SettingsRepository {
 
   Future<void> setLastOpenFileIds(List<String> ids) =>
       _prefs.setStringList(_kLastOpenIds, ids);
+
+  /// 角色系数配置列表的分组布局 token（组标题与条目 id 混排，见 LibraryLayout）。
+  List<String> get profileLayoutTokens =>
+      _prefs.getStringList(_kProfileLayout) ?? [];
+
+  Future<void> setProfileLayoutTokens(List<String> tokens) =>
+      _prefs.setStringList(_kProfileLayout, tokens);
+
+  /// 评分文件列表的分组布局 token。
+  List<String> get scoreLayoutTokens =>
+      _prefs.getStringList(_kScoreLayout) ?? [];
+
+  Future<void> setScoreLayoutTokens(List<String> tokens) =>
+      _prefs.setStringList(_kScoreLayout, tokens);
 }
