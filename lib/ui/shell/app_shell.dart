@@ -45,9 +45,11 @@ class _AppShellState extends State<AppShell> with WindowListener {
     super.dispose();
   }
 
+  bool _closing = false;
+
   @override
   void onWindowClose() {
-    if (!widget.windowCloseGuard) return;
+    if (!widget.windowCloseGuard || _closing) return;
     _confirmAndClose();
   }
 
@@ -73,7 +75,11 @@ class _AppShellState extends State<AppShell> with WindowListener {
       if (choice == UnsavedChoice.cancel || !mounted) return;
       if (choice == UnsavedChoice.save) await workspace.saveAll();
     }
-    await windowManager.destroy();
+    // 守卫通过后不直接 destroy()：release 下从消息通道线程 PostQuitMessage
+    // 结束不了主循环。改为解除拦截再走原生关闭，让 WM_DESTROY 在主循环线程里退出。
+    _closing = true;
+    await windowManager.setPreventClose(false);
+    await windowManager.close();
   }
 
   @override
