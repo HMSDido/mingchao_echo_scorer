@@ -71,6 +71,15 @@ Layered, dependency flows downward only (`ui → state → domain/data → core`
 Key invariants:
 - **Derived data is never persisted.** Score, rating, expected-max, and
   probability are always recomputed from `tiers + coefficients`.
+- **List grouping/order is a local UI preference only.** `LibraryLayout`
+  (`lib/state/library_layout.dart`) persists a flat token sequence
+  (`g:<组名>` headers / `p:<profileId>` / `s:<fileId>`) to prefs
+  (`library.profileLayout` / `library.scoreLayout`). It never touches data
+  models or `ShareLink`, and layout ops must not dirty files. Deleting a group
+  header hoists its members to the root layer; 清空 deletes members instead.
+  Dragging uses `ReorderableListView` + `onReorderItem` (Flutter 3.47:
+  `onReorder` is deprecated), whose newIndex is post-removal — `moveNode`
+  follows those coordinates.
 - **Coefficients are snapshotted** into each `ScoreFile` when a profile is
   applied, so later profile edits don't silently rescore saved files.
 - Accumulate at **full precision, round once** to 2 decimals for display
