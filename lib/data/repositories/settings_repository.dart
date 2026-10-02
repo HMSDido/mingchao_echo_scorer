@@ -30,6 +30,8 @@ class SettingsRepository {
   static const String _kLastOpenIds = 'workspace.lastOpenIds';
   static const String _kProfileLayout = 'library.profileLayout';
   static const String _kScoreLayout = 'library.scoreLayout';
+  static const String _kProfileExpanded = 'library.profileExpanded';
+  static const String _kScoreExpanded = 'library.scoreExpanded';
 
   /// 默认主题种子色（深紫，与 Flutter 模板一致）。
   static const int defaultSeedColor = 0xFF6750A4;
@@ -97,4 +99,17 @@ class SettingsRepository {
 
   Future<void> setScoreLayoutTokens(List<String> tokens) =>
       _prefs.setStringList(_kScoreLayout, tokens);
+
+  /// 处于展开态的分组名（组默认收起，这里存的是例外集合）。
+  List<String> get profileExpandedGroups =>
+      _prefs.getStringList(_kProfileExpanded) ?? [];
+
+  Future<void> setProfileExpandedGroups(List<String> names) =>
+      _prefs.setStringList(_kProfileExpanded, names);
+
+  List<String> get scoreExpandedGroups =>
+      _prefs.getStringList(_kScoreExpanded) ?? [];
+
+  Future<void> setScoreExpandedGroups(List<String> names) =>
+      _prefs.setStringList(_kScoreExpanded, names);
 }

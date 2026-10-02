@@ -29,12 +29,16 @@ class WorkspaceController extends ChangeNotifier {
       _layout = LibraryLayout(
         idPrefix: 's:',
         tokens: settings.scoreLayoutTokens,
-      );
+      ),
+      _expanded = {...settings.scoreExpandedGroups};
 
   final ScoreRepository _repo;
   final StorageService _storage;
   final SettingsRepository _settings;
   final LibraryLayout _layout;
+
+  /// 展开的分组集合：**默认全部折叠**，这里存的是例外（展开的那几个）。
+  final Set<String> _expanded;
 
   final List<LeaveGuard> _guards = [];
 
@@ -76,17 +80,43 @@ class WorkspaceController extends ChangeNotifier {
 
   /// 展示用的布局行：组标题与文件 id 混排，未收录的新文件补在根层末尾。
   ///
+  /// 收起的组只保留组标题（默认折叠）；组内文件数请用 [layoutGroupMemberIds]。
   /// 搜索时界面退回 [visibleOpenFiles] 的扁平列表，不走这里。
   List<LayoutNode> get layoutRows =>
-      _layout.viewWith([for (final file in _open) file.id]);
+      _layout.collapsedView([for (final file in _open) file.id], _expanded);
 
-  /// 组内的文件 id（清空组时用）。
-  List<String> layoutGroupMemberIds(String name) =>
-      _layout.groupMemberIds(name);
+  /// 组内的文件 id（清空组、导出本组、组内文件数时用）。
+  ///
+  /// 过滤掉磁盘上已不存在的残留 token，计数与实际操作都以现有文件为准。
+  List<String> layoutGroupMemberIds(String name) {
+    final live = {for (final file in _open) file.id};
+    return _layout
+        .groupMemberIds(name)
+        .where(live.contains)
+        .toList(growable: false);
+  }
+
+  bool isGroupExpanded(String name) => _expanded.contains(name);
+
+  /// 切换组的折叠状态（点组头）。
+  void toggleLayoutGroup(String name) {
+    if (!_expanded.remove(name)) _expanded.add(name);
+    _persistExpanded();
+    notifyListeners();
+  }
 
   void moveLayoutRow(int oldIndex, int newIndex) {
     _syncLayout();
-    _layout.moveNode(oldIndex, newIndex);
+    final view = layoutRows;
+    if (oldIndex < 0 || oldIndex >= view.length) return;
+    final dragged = view[oldIndex];
+    _layout.moveNodeInView(view, oldIndex, newIndex);
+    // 文件被拖进（或留在）某个组后，把该组展开，否则用户看不到拖入的结果。
+    final target = _layout.groupOf(dragged.value);
+    if (target != null && !_expanded.contains(target)) {
+      _expanded.add(target);
+      _persistExpanded();
+    }
     _persistLayout();
     notifyListeners();
   }
@@ -102,7 +132,9 @@ class WorkspaceController extends ChangeNotifier {
   bool renameLayoutGroup(String name, String newName) {
     _syncLayout();
     if (!_layout.renameGroup(name, newName)) return false;
+    if (_expanded.remove(name)) _expanded.add(newName);
     _persistLayout();
+    _persistExpanded();
     notifyListeners();
     return true;
   }
@@ -111,7 +143,9 @@ class WorkspaceController extends ChangeNotifier {
   void deleteLayoutGroup(String name) {
     _syncLayout();
     _layout.deleteGroup(name);
+    _expanded.remove(name);
     _persistLayout();
+    _persistExpanded();
     notifyListeners();
   }
 
@@ -119,13 +153,18 @@ class WorkspaceController extends ChangeNotifier {
   void placeInLayoutGroup(String name, String fileId) {
     _syncLayout();
     _layout.insertIntoGroup(name, fileId);
+    _expanded.add(name);
     _persistLayout();
+    _persistExpanded();
     notifyListeners();
   }
 
   void _syncLayout() => _layout.mergeWith([for (final file in _open) file.id]);
 
   void _persistLayout() => _settings.setScoreLayoutTokens(_layout.tokens);
+
+  void _persistExpanded() =>
+      _settings.setScoreExpandedGroups(_expanded.toList());
 
   ScoreFile? get activeFile => byId(_activeId);
 
@@ -236,7 +275,11 @@ class WorkspaceController extends ChangeNotifier {
     final created = await _repo.save(ScoreFile.empty(name: name));
     await reloadDisk();
     _addOpen(created);
-    if (inGroup != null) _layout.insertIntoGroup(inGroup, created.id);
+    if (inGroup != null) {
+      _layout.insertIntoGroup(inGroup, created.id);
+      _expanded.add(inGroup);
+      _persistExpanded();
+    }
     _persistLayout();
     _activeId = created.id;
     _view = ShellView.files;

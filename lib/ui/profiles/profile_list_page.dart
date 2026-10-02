@@ -9,12 +9,12 @@ import '../../domain/score_calculator.dart';
 import '../../state/profile_controller.dart';
 import '../actions/profile_actions.dart';
 import '../widgets/dialogs.dart';
-import '../../state/library_layout.dart';
 
 /// 「编辑角色系数」页：可分组、可拖拽的配置列表 + 新建按钮 + ⋮ 菜单。
 ///
 /// 列表用 [ReorderableListView]：组标题也是可拖的行，拖标题整组移动，
 /// 拖条目即可跨组 / 跨根层移动；宽窄屏共用这一份实现。
+/// 分组默认折叠，点组标题展开/收起（展开态是本机偏好，持久化到 prefs）。
 class ProfileListPage extends StatefulWidget {
   const ProfileListPage({super.key});
 
@@ -143,7 +143,11 @@ class _ProfileListPageState extends State<ProfileListPage> {
                     key: ValueKey('g:${row.value}'),
                     index: index,
                     name: row.value,
-                    memberCount: _groupSize(rows, index),
+                    memberCount: controller
+                        .layoutGroupMemberIds(row.value)
+                        .length,
+                    expanded: controller.isGroupExpanded(row.value),
+                    onToggle: () => controller.toggleLayoutGroup(row.value),
                   );
                 }
                 final profile = controller.byId(row.value);
@@ -174,27 +178,22 @@ class _ProfileListPageState extends State<ProfileListPage> {
   }
 }
 
-/// 布局里某个组标题后面的连续条目数（组内配置数）。
-int _groupSize(List<LayoutNode> rows, int headerIndex) {
-  var count = 0;
-  for (var i = headerIndex + 1; i < rows.length && !rows[i].isGroup; i++) {
-    count++;
-  }
-  return count;
-}
-
-/// 分组标题行：整组可拖（拖把手，或触屏长按），⋮ 承载组管理操作。
+/// 分组标题行：点标题展开/收起，整组可拖（拖把手，或触屏长按），⋮ 承载组管理操作。
 class _GroupTile extends StatelessWidget {
   const _GroupTile({
     super.key,
     required this.index,
     required this.name,
     required this.memberCount,
+    required this.expanded,
+    required this.onToggle,
   });
 
   final int index;
   final String name;
   final int memberCount;
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -206,56 +205,66 @@ class _GroupTile extends StatelessWidget {
         child: Material(
           color: theme.colorScheme.surfaceContainerHigh,
           borderRadius: BorderRadius.circular(10),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(2, 8, 2, 8),
-            child: Row(
-              children: [
-                ReorderableDragStartListener(
-                  index: index,
-                  child: Icon(
-                    Icons.drag_indicator,
-                    size: 20,
-                    color: theme.colorScheme.outline,
-                  ),
-                ),
-                Icon(
-                  Icons.folder_outlined,
-                  size: 18,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: onToggle,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(2, 8, 2, 8),
+              child: Row(
+                children: [
+                  ReorderableDragStartListener(
+                    index: index,
+                    child: Icon(
+                      Icons.drag_indicator,
+                      size: 20,
+                      color: theme.colorScheme.outline,
                     ),
                   ),
-                ),
-                Text(
-                  '$memberCount 个',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                  Icon(
+                    expanded ? Icons.expand_more : Icons.chevron_right,
+                    size: 20,
+                    color: theme.colorScheme.primary,
                   ),
-                ),
-                PopupMenuButton<String>(
-                  key: ValueKey('group-menu-$name'),
-                  tooltip: '分组管理',
-                  icon: const Icon(Icons.more_vert, size: 18),
-                  padding: EdgeInsets.zero,
-                  onSelected: (value) => _onMenu(context, value),
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(value: 'create', child: Text('在组内新建配置')),
-                    PopupMenuItem(value: 'rename', child: Text('重命名分组')),
-                    PopupMenuItem(value: 'export', child: Text('导出本组')),
-                    PopupMenuItem(value: 'clear', child: Text('清空分组（删配置）')),
-                    PopupMenuDivider(),
-                    PopupMenuItem(value: 'delete', child: Text('删除分组（留配置）')),
-                  ],
-                ),
-              ],
+                  const SizedBox(width: 4),
+                  Icon(
+                    expanded ? Icons.folder_open : Icons.folder_outlined,
+                    size: 18,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '$memberCount 个',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  PopupMenuButton<String>(
+                    key: ValueKey('group-menu-$name'),
+                    tooltip: '分组管理',
+                    icon: const Icon(Icons.more_vert, size: 18),
+                    padding: EdgeInsets.zero,
+                    onSelected: (value) => _onMenu(context, value),
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(value: 'create', child: Text('在组内新建配置')),
+                      PopupMenuItem(value: 'rename', child: Text('重命名分组')),
+                      PopupMenuItem(value: 'export', child: Text('导出本组')),
+                      PopupMenuItem(value: 'clear', child: Text('清空分组（删配置）')),
+                      PopupMenuDivider(),
+                      PopupMenuItem(value: 'delete', child: Text('删除分组（留配置）')),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),

@@ -806,6 +806,58 @@ void main() {
     expect(lines, isNot(contains('# 组外文件评分文件')));
   });
 
+  testWidgets('分组默认折叠：收起只见组名与数量，点组头展开', (tester) async {
+    final harness = await _pumpApp(tester);
+    final a = (await harness.runAsync(
+      () => harness.workspace.createFile('甲文件'),
+    ))!;
+    final b = (await harness.runAsync(
+      () => harness.workspace.createFile('乙文件'),
+    ))!;
+    expect(harness.workspace.addLayoutGroup('日常'), isTrue);
+    harness.workspace.placeInLayoutGroup('日常', a.id);
+    harness.workspace.placeInLayoutGroup('日常', b.id);
+    await tester.pumpAndSettle();
+    // 组内新建/放入后自动展开，保证用户看得见结果。
+    expect(harness.workspace.isGroupExpanded('日常'), isTrue);
+    expect(_panelFile('甲文件'), findsOneWidget);
+
+    // 点组头收起：条目消失，组名和数量仍在。
+    await tester.tap(
+      find.descendant(of: find.byType(FilePanel), matching: find.text('日常')),
+    );
+    await tester.pumpAndSettle();
+    expect(_panelFile('甲文件'), findsNothing);
+    expect(_panelFile('乙文件'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(FilePanel),
+        matching: find.byIcon(Icons.chevron_right),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      harness.settings.repository.scoreExpandedGroups,
+      isNot(contains('日常')),
+    );
+
+    // 再点展开。
+    await tester.tap(
+      find.descendant(of: find.byType(FilePanel), matching: find.text('日常')),
+    );
+    await tester.pumpAndSettle();
+    expect(_panelFile('甲文件'), findsOneWidget);
+    expect(harness.settings.repository.scoreExpandedGroups, contains('日常'));
+
+    // 收起态的组仍统计完整成员数（2 而非可见行数 0）。
+    harness.workspace.toggleLayoutGroup('日常');
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: find.byType(FilePanel), matching: find.text('2')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('配置页 ⋮ 菜单收拢导入导出，并能批量删除勾选的配置', (tester) async {
     final harness = await _pumpApp(tester);
     await harness.runAsync(() async {

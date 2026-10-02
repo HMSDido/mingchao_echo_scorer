@@ -122,26 +122,6 @@ class LibraryLayout {
 
   // ---------------------------------------------------------------- 重排
 
-  /// 按 [ReorderableListView.onReorderItem] 的索引语义重排扁平行：
-  /// [insertIndex] 已是「移除被拖行之后」列表中的落点下标。
-  ///
-  /// 拖动组标题时整组（标题 + 成员）一起移动；落点仍在原组范围内不生效。
-  void moveNode(int oldIndex, int insertIndex) {
-    if (!rowIsGroup(oldIndex)) {
-      if (insertIndex == oldIndex) return;
-      _nodes.insert(insertIndex, _nodes.removeAt(oldIndex));
-      return;
-    }
-    final end = _groupEnd(oldIndex);
-    if (insertIndex >= oldIndex && insertIndex <= end - 1) return;
-    final block = _nodes.sublist(oldIndex, end);
-    _nodes.removeRange(oldIndex, end);
-    final insertAt = insertIndex < oldIndex
-        ? insertIndex
-        : insertIndex - block.length + 1;
-    _nodes.insertAll(insertAt, block);
-  }
-
   /// 与当前存在的条目对账：布局里已不存在的条目丢弃；
   /// 布局未覆盖的新条目按 [liveIds] 给出的顺序追加到根层末尾。
   void mergeWith(List<String> liveIds) {
@@ -171,6 +151,84 @@ class LibraryLayout {
     final first = view.indexWhere((node) => node.isGroup);
     view.insertAll(first < 0 ? view.length : first, missing);
     return view;
+  }
+
+  /// 折叠后的可见行：组标题总是保留；不在 [expandedNames] 里的组（默认收起）
+  /// 隐藏其成员。根层条目不受影响。
+  List<LayoutNode> collapsedView(
+    List<String> liveIds,
+    Set<String> expandedNames,
+  ) {
+    final rows = viewWith(liveIds);
+    final visible = <LayoutNode>[];
+    var inCollapsedGroup = false;
+    for (final node in rows) {
+      if (node.isGroup) {
+        inCollapsedGroup = !expandedNames.contains(node.value);
+        visible.add(node);
+      } else if (!inCollapsedGroup) {
+        visible.add(node);
+      }
+    }
+    return visible;
+  }
+
+  /// 条目当前所属的组名；根层条目返回 null。
+  String? groupOf(String id) {
+    String? current;
+    for (final node in _nodes) {
+      if (node.isGroup) {
+        current = node.value;
+      } else if (node.value == id) {
+        return current;
+      }
+    }
+    return null;
+  }
+
+  /// 按「可见行」坐标重排：[view] 是折叠过滤后的行列表（与界面渲染一致），
+  /// [oldIndex] / [insertIndex] 沿用 onReorderItem 的语义：
+  /// [insertIndex] 是「仅移除被拖行之后」的可见列表中的落点下标。
+  ///
+  /// 收起的组只有标题可见，但拖动标题仍搬运整组（含隐藏成员）；
+  /// 落点锚定在某个可见行之前，隐藏成员因此不会被拆散。
+  /// 全部展开时 [view] 与扁平布局等价，普通拖拽同样走这里。
+  void moveNodeInView(List<LayoutNode> view, int oldIndex, int insertIndex) {
+    final dragged = view[oldIndex];
+    final layoutStart = dragged.isGroup
+        ? _headerIndex(dragged.value)
+        : _nodes.indexWhere(
+            (node) => !node.isGroup && node.value == dragged.value,
+          );
+    if (layoutStart < 0) return;
+    final layoutEnd = dragged.isGroup
+        ? _groupEnd(layoutStart)
+        : layoutStart + 1;
+    // 可见列表只移除被拖的那一行（组内其余可见行留在原位）。
+    final remaining = <LayoutNode>[
+      ...view.sublist(0, oldIndex),
+      ...view.sublist(oldIndex + 1),
+    ];
+    final anchor = insertIndex < remaining.length
+        ? remaining[insertIndex]
+        : null;
+    var insertAt = _nodes.length;
+    if (anchor != null) {
+      final found = _nodes.indexWhere(
+        (node) => node.isGroup == anchor.isGroup && node.value == anchor.value,
+      );
+      // 落点在自己组内（组标题拖到自身成员上）视为原位不动。
+      if (found >= layoutStart && found < layoutEnd) return;
+      insertAt = found < 0
+          ? _nodes.length
+          : found < layoutStart
+          ? found
+          : found - (layoutEnd - layoutStart);
+    }
+    final block = _nodes.sublist(layoutStart, layoutEnd);
+    _nodes.removeRange(layoutStart, layoutEnd);
+    // 无锚点（拖到列表末尾）时 insertAt 还是移除前的长度，需要夹一下。
+    _nodes.insertAll(insertAt.clamp(0, _nodes.length), block);
   }
 
   // ---------------------------------------------------------------- 内部

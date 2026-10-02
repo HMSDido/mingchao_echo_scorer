@@ -15,6 +15,7 @@ enum _PanelMenu { exportMany, copyAll }
 ///
 /// 无搜索词时用 [ReorderableListView]：组标题也是可拖的行，
 /// 拖标题整组移动，拖条目即可跨组 / 跨根层移动；搜索时退回扁平过滤列表。
+/// 分组默认折叠，点组标题展开/收起（展开态是本机偏好，持久化到 prefs）。
 class FilePanel extends StatefulWidget {
   const FilePanel({super.key});
 
@@ -161,7 +162,12 @@ class _FilePanelState extends State<FilePanel> {
                           key: ValueKey('g:${row.value}'),
                           index: index,
                           name: row.value,
-                          memberCount: _groupSize(rows, index),
+                          memberCount: workspace
+                              .layoutGroupMemberIds(row.value)
+                              .length,
+                          expanded: workspace.isGroupExpanded(row.value),
+                          onToggle: () =>
+                              workspace.toggleLayoutGroup(row.value),
                         );
                       }
                       final file = workspace.byId(row.value);
@@ -184,27 +190,22 @@ class _FilePanelState extends State<FilePanel> {
   }
 }
 
-/// 布局里某个组标题后面的连续条目数（组内文件数）。
-int _groupSize(List<({bool isGroup, String value})> rows, int headerIndex) {
-  var count = 0;
-  for (var i = headerIndex + 1; i < rows.length && !rows[i].isGroup; i++) {
-    count++;
-  }
-  return count;
-}
-
-/// 文件栏里的分组标题行：拖把手（或长按）移动整组，⋮ 承载组管理。
+/// 文件栏里的分组标题行：点标题展开/收起，拖把手（或长按）移动整组，⋮ 承载组管理。
 class _GroupTile extends StatelessWidget {
   const _GroupTile({
     super.key,
     required this.index,
     required this.name,
     required this.memberCount,
+    required this.expanded,
+    required this.onToggle,
   });
 
   final int index;
   final String name;
   final int memberCount;
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -216,56 +217,66 @@ class _GroupTile extends StatelessWidget {
         child: Material(
           color: theme.colorScheme.surfaceContainerHigh,
           borderRadius: BorderRadius.circular(10),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(2, 6, 2, 6),
-            child: Row(
-              children: [
-                ReorderableDragStartListener(
-                  index: index,
-                  child: Icon(
-                    Icons.drag_indicator,
-                    size: 16,
-                    color: theme.colorScheme.outline,
-                  ),
-                ),
-                Icon(
-                  Icons.folder_outlined,
-                  size: 15,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: onToggle,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(2, 6, 2, 6),
+              child: Row(
+                children: [
+                  ReorderableDragStartListener(
+                    index: index,
+                    child: Icon(
+                      Icons.drag_indicator,
+                      size: 16,
+                      color: theme.colorScheme.outline,
                     ),
                   ),
-                ),
-                Text(
-                  '$memberCount',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                  Icon(
+                    expanded ? Icons.expand_more : Icons.chevron_right,
+                    size: 18,
+                    color: theme.colorScheme.primary,
                   ),
-                ),
-                PopupMenuButton<String>(
-                  key: ValueKey('file-group-menu-$name'),
-                  tooltip: '分组管理',
-                  icon: const Icon(Icons.more_vert, size: 18),
-                  padding: EdgeInsets.zero,
-                  onSelected: (value) => _onMenu(context, value),
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(value: 'create', child: Text('在组内新建文件')),
-                    PopupMenuItem(value: 'rename', child: Text('重命名分组')),
-                    PopupMenuItem(value: 'export', child: Text('导出本组')),
-                    PopupMenuItem(value: 'clear', child: Text('清空分组（删文件）')),
-                    PopupMenuDivider(),
-                    PopupMenuItem(value: 'delete', child: Text('删除分组（留文件）')),
-                  ],
-                ),
-              ],
+                  const SizedBox(width: 4),
+                  Icon(
+                    expanded ? Icons.folder_open : Icons.folder_outlined,
+                    size: 15,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '$memberCount',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  PopupMenuButton<String>(
+                    key: ValueKey('file-group-menu-$name'),
+                    tooltip: '分组管理',
+                    icon: const Icon(Icons.more_vert, size: 18),
+                    padding: EdgeInsets.zero,
+                    onSelected: (value) => _onMenu(context, value),
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(value: 'create', child: Text('在组内新建文件')),
+                      PopupMenuItem(value: 'rename', child: Text('重命名分组')),
+                      PopupMenuItem(value: 'export', child: Text('导出本组')),
+                      PopupMenuItem(value: 'clear', child: Text('清空分组（删文件）')),
+                      PopupMenuDivider(),
+                      PopupMenuItem(value: 'delete', child: Text('删除分组（留文件）')),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
