@@ -39,6 +39,11 @@ class ProfileController extends ChangeNotifier {
   List<LayoutNode> get layoutRows =>
       _layout.collapsedView([for (final p in _profiles) p.id], _expanded);
 
+  /// 「选择角色」弹窗用的未折叠布局行：组归属照实给出，
+  /// 折叠状态由弹窗自己按会话内的展开集合处理（默认收起，不写 prefs）。
+  List<LayoutNode> get pickerLayoutRows =>
+      _layout.viewWith([for (final p in _profiles) p.id]);
+
   /// 组内的配置 id（清空组、导出本组、组内配置数时用）。
   ///
   /// 过滤掉磁盘上已不存在的残留 token，计数与实际操作都以现有配置为准。

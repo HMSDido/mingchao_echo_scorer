@@ -125,6 +125,41 @@ void main() {
     expect(harness.workspace.isDirty(file), isTrue);
   });
 
+  testWidgets('「选择角色」弹窗按分组显示：组头默认折叠，点开才能选', (tester) async {
+    final harness = await _pumpApp(tester);
+    final grouped = (await harness.runAsync(
+      () => harness.profiles.create('01长离'),
+    ))!;
+    await harness.runAsync(() => harness.profiles.create('组外配置'));
+    expect(harness.profiles.addLayoutGroup('绯雪'), isTrue);
+    harness.profiles.placeInLayoutGroup('绯雪', grouped.id);
+    // 组内放入会自动展开；先收起，才能区分弹窗展开态与列表展开态。
+    harness.profiles.toggleLayoutGroup('绯雪');
+    await harness.runAsync(() => harness.workspace.createFile('测试文件'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, '选择角色'));
+    await _settle(tester);
+    expect(find.text('选择角色'), findsWidgets);
+
+    // 组标题可见但不可选；收起的组里条目不显示，根层条目照常显示。
+    expect(find.text('绯雪'), findsOneWidget);
+    expect(find.text('01长离'), findsNothing);
+    expect(find.text('组外配置'), findsOneWidget);
+
+    await tester.tap(find.text('绯雪'));
+    await tester.pumpAndSettle();
+    expect(find.text('01长离'), findsOneWidget);
+
+    await tester.tap(find.text('01长离'));
+    await _settle(tester);
+    expect(harness.workspace.activeFile!.profileName, '01长离');
+
+    // 弹窗的展开态只活在本次会话：不写 prefs，列表页的折叠不受影响。
+    expect(harness.settings.repository.profileExpandedGroups, isEmpty);
+    await _dismissSnackBars(tester);
+  });
+
   testWidgets('总览页显示总分与 5 张声骸卡片', (tester) async {
     await _pumpApp(tester);
     await _seedScoredFile(tester, fileName: '长离-主C');

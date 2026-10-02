@@ -416,6 +416,8 @@ class FileActions {
           ? '全部系数为 0'
           : '理论最高分 ${Format.score(ScoreCalculator.roundTo2(ScoreCalculator.echoMaxRaw(profile.coefficients)))}／件',
       emptyMessage: '还没有角色系数配置。请先到「编辑角色系数」新建一份。',
+      groupRows: profiles.pickerLayoutRows,
+      idBuilder: (profile) => profile.id,
     );
     if (picked == null || !context.mounted) return;
     workspace.applyProfile(file, picked);

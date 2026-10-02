@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../state/library_layout.dart';
+
 /// 未保存改动的处置选择。
 enum UnsavedChoice {
   save('保存'),
@@ -173,6 +175,10 @@ class Dialogs {
   );
 
   /// 从若干选项中挑一个；取消返回 null。
+  ///
+  /// 传入 [groupRows]（列表分组布局）与 [idBuilder] 时按分组显示：
+  /// 组标题不可选、默认折叠、点击展开/收起（展开态只活在本次弹窗内，
+  /// 不写 prefs，不影响外面的列表）；布局未收录的选项排在根层。
   static Future<T?> pick<T>(
     BuildContext context, {
     required String title,
@@ -181,50 +187,156 @@ class Dialogs {
     String Function(T item)? subtitleBuilder,
     Widget Function(T item)? leadingBuilder,
     String? emptyMessage,
+    List<LayoutNode>? groupRows,
+    String Function(T item)? idBuilder,
   }) => showDialog<T>(
     context: context,
-    builder: (dialogContext) {
-      final theme = Theme.of(dialogContext);
-      return AlertDialog(
-        title: Text(title),
-        contentPadding: const EdgeInsets.symmetric(vertical: 12),
-        content: SizedBox(
-          width: 420,
-          child: items.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Text(
-                    emptyMessage ?? '暂无可选项',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                )
-              : ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 420),
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      for (final item in items)
-                        ListTile(
-                          leading: leadingBuilder?.call(item),
-                          title: Text(labelBuilder(item)),
-                          subtitle: subtitleBuilder == null
-                              ? null
-                              : Text(subtitleBuilder(item)),
-                          onTap: () => Navigator.of(dialogContext).pop(item),
-                        ),
-                    ],
-                  ),
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('取消'),
-          ),
-        ],
-      );
-    },
+    builder: (_) => _PickDialog<T>(
+      title: title,
+      items: items,
+      labelBuilder: labelBuilder,
+      subtitleBuilder: subtitleBuilder,
+      leadingBuilder: leadingBuilder,
+      emptyMessage: emptyMessage,
+      groupRows: groupRows,
+      idBuilder: idBuilder,
+    ),
   );
+}
+
+/// [Dialogs.pick] 的对话框内容：可选按分组布局渲染。
+class _PickDialog<T> extends StatefulWidget {
+  const _PickDialog({
+    required this.title,
+    required this.items,
+    required this.labelBuilder,
+    required this.subtitleBuilder,
+    required this.leadingBuilder,
+    required this.emptyMessage,
+    required this.groupRows,
+    required this.idBuilder,
+  });
+
+  final String title;
+  final List<T> items;
+  final String Function(T item) labelBuilder;
+  final String Function(T item)? subtitleBuilder;
+  final Widget Function(T item)? leadingBuilder;
+  final String? emptyMessage;
+  final List<LayoutNode>? groupRows;
+  final String Function(T item)? idBuilder;
+
+  @override
+  State<_PickDialog<T>> createState() => _PickDialogState<T>();
+}
+
+class _PickDialogState<T> extends State<_PickDialog<T>> {
+  /// 会话内展开的组（默认全部折叠），不持久化。
+  final Set<String> _expanded = {};
+
+  bool get _grouped =>
+      widget.groupRows != null &&
+      widget.groupRows!.any((row) => row.isGroup) &&
+      widget.idBuilder != null;
+
+  void _toggleGroup(String name) {
+    setState(() {
+      if (!_expanded.remove(name)) _expanded.add(name);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: Text(widget.title),
+      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+      content: SizedBox(
+        width: 420,
+        child: widget.items.isEmpty
+            ? Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  widget.emptyMessage ?? '暂无可选项',
+                  style: theme.textTheme.bodyMedium,
+                ),
+              )
+            : ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 420),
+                child: _grouped ? _groupedList(theme) : _flatList(),
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+      ],
+    );
+  }
+
+  Widget _flatList() => ListView(
+    shrinkWrap: true,
+    children: [for (final item in widget.items) _tile(item, indent: false)],
+  );
+
+  Widget _groupedList(ThemeData theme) {
+    final byId = {
+      for (final item in widget.items) widget.idBuilder!(item): item,
+    };
+    final rows = widget.groupRows!;
+    final children = <Widget>[];
+    var inCollapsedGroup = false;
+    for (final row in rows) {
+      if (row.isGroup) {
+        final expanded = _expanded.contains(row.value);
+        inCollapsedGroup = !expanded;
+        children.add(
+          ListTile(
+            dense: true,
+            visualDensity: const VisualDensity(vertical: -1),
+            leading: Icon(
+              expanded ? Icons.expand_more : Icons.chevron_right,
+              color: theme.colorScheme.primary,
+            ),
+            title: Text(
+              row.value,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            onTap: () => _toggleGroup(row.value),
+          ),
+        );
+      } else {
+        final item = byId.remove(row.value);
+        if (item != null && !inCollapsedGroup) {
+          children.add(_tile(item, indent: true));
+        }
+      }
+    }
+    // 布局未收录的选项补在根层末尾。
+    for (final item in widget.items) {
+      if (byId.containsKey(widget.idBuilder!(item))) {
+        children.add(_tile(item, indent: false));
+      }
+    }
+    return ListView(shrinkWrap: true, children: children);
+  }
+
+  Widget _tile(T item, {required bool indent}) {
+    return Padding(
+      padding: EdgeInsets.only(left: indent ? 24 : 0),
+      child: ListTile(
+        leading: widget.leadingBuilder?.call(item),
+        title: Text(widget.labelBuilder(item)),
+        subtitle: widget.subtitleBuilder == null
+            ? null
+            : Text(widget.subtitleBuilder!(item)),
+        onTap: () => Navigator.of(context).pop(item),
+      ),
+    );
+  }
 }
 
 /// [Dialogs.pickMulti] 的对话框内容：勾选若干项后一次性返回。
