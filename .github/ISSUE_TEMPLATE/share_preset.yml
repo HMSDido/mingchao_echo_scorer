@@ -9,7 +9,8 @@ body:
       value: |
         感谢分享！填写以下内容即可，维护者会人工审阅并收录进
         `共享角色系数配置文件/`。
-        文件命名请标注**角色链数 + 专武链 + 角色名**，例如 `31绯雪系数`。
+        配置名称请标注**角色链数 + 专武链 + 角色名**，例如 `31绯雪系数`
+        （在应用里新建或重命名配置时写好即可，链接里会带上这个名字）。
   - type: input
     id: character
     attributes:
@@ -27,19 +28,15 @@ body:
     validations:
       required: true
   - type: textarea
-    id: json
+    id: share
     attributes:
-      label: JSON 文件内容
+      label: 分享链接
       description: >-
-        把应用「导出为 JSON」得到的 .json 文件拖到下方直接上传，
-        或将文件内容整段粘贴在此处。
+        在应用「编辑角色系数」页点配置右侧的 ⋮ →「复制分享链接」，
+        把得到的整行 echoscorer://… 粘贴到这里；多份配置一行一条。
+        请统一用应用内的这个导出方式，不要手写 JSON —— 机器人会解码后校验格式。
       placeholder: |
-        {
-          "format": 1,
-          "id": "preset-31-feixue",
-          "name": "31绯雪系数",
-          "coefficients": { "critRate": 1.0, "critDmg": 1.2 }
-        }
+        echoscorer://eyJmb3JtYXQiOjEsImlkIjoicHJlc2V0LTMxLWZlaXh1ZSIsIm5hbWUiOiIzMee7r+mbquezu+aVsCIsImNvZWZmaWNpZW50cyI6eyJjcml0UmF0ZSI6MS4wLCJjcml0RG1nIjoxLjJ9LCJjcmVhdGVkQXQiOiIyMDI2LTEwLTAxVDExOjUyOjUwWiIsInVwZGF0ZWRBdCI6IjIwMjYtMTAtMDFUMTI6NTk6MzRaIn0=
     validations:
       required: true
   - type: textarea

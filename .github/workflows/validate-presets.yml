@@ -1,6 +1,7 @@
 name: 校验社区配置
 
-# 只做一件事：检查社区提交的角色系数 JSON 能否被正常解析。
+# 只做一件事：检查社区提交的角色系数能否被正常解析（PR 里新增的 .json，
+# 或 Issue 正文里粘贴的 echoscorer:// 分享链接 / 整段 JSON）。
 # 不校验系数数值大小、项数或取值范围 —— 权重是否合理由维护者人工审阅。
 on:
   pull_request:
@@ -29,18 +30,29 @@ jobs:
           # 下一步就会拿这个假路径去开文件，把每份正常配置都误报成解析失败。
           git -c core.quotepath=off diff --name-only --diff-filter=A \
             "origin/${{ github.base_ref }}"...HEAD \
-            -- '共享角色系数配置文件/' | grep '\.json$' > added.txt || true
+            -- '共享角色系数配置文件/' > added.txt || true
           echo "count=$(wc -l < added.txt)"
           cat added.txt
 
-      - name: 检查 JSON 是否可解析
+      - name: 检查分享链接 / JSON 是否可解析
         id: check
         run: |
           status=0
           : > failed.md
           while IFS= read -r file; do
             [ -z "$file" ] && continue
-            if python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8-sig"))' "$file"; then
+            if python3 - "$file" <<'PY'
+          import base64, json, sys
+          text = open(sys.argv[1], encoding='utf-8-sig').read().strip()
+          # 目录里存的是应用「复制分享链接」产出的 echoscorer:// 文本；
+          # 兼容直接提交的裸 JSON（历史格式）。
+          if text.lower().startswith('echoscorer://'):
+              body = text[len('echoscorer://'):].replace('-', '+').replace('_', '/')
+              body += '=' * (-len(body) % 4)
+              text = base64.b64decode(body, validate=True).decode('utf-8')
+          json.loads(text)
+          PY
+            then
               echo "OK   $file"
             else
               echo "FAIL $file"
@@ -69,15 +81,16 @@ jobs:
           gh pr comment "$PR" --body "$(cat <<EOF
           ### 配置文件解析失败
 
-          以下新增的角色系数 JSON **无法被解析为合法 JSON**，暂时无法审阅收录：
+          以下新增的角色系数**无法被解析**（分享链接解不开，或 JSON 不合法），暂时无法审阅收录：
           $FAILED
 
           请检查：
-          - 是否有多余的逗号、引号不匹配或不可见字符；
-          - 是否为应用「导出为 JSON」生成的原始文件（请勿手工改写外层结构）；
-          - 文件是否放在 \`共享角色系数配置文件/\` 目录下、扩展名为 \`.json\`。
+          - 文件内容是否为应用 \`⋮\` →「复制分享链接」得到的整行 \`echoscorer://…\`
+            （请勿手工改写、换行或截断）；
+          - 若直接提交 JSON：是否有多余的逗号、引号不匹配或不可见字符；
+          - 文件是否放在 \`共享角色系数配置文件/\` 目录下。
 
-          修正后重新推送即可。本检查只看 JSON 能否正常解析，
+          修正后重新推送即可。本检查只看内容能否正常解析，
           **不会校验系数数值大小或项数**，权重取值由维护者人工审阅。
           EOF
           )"
@@ -88,22 +101,42 @@ jobs:
       contains(github.event.issue.labels.*.name, 'community-preset')
     runs-on: ubuntu-latest
     steps:
-      - name: 提取并校验正文中的 JSON
+      - name: 提取并校验正文中的分享链接或 JSON
         id: check
         env:
           BODY: ${{ github.event.issue.body }}
         run: |
           python3 <<'PY' >> "$GITHUB_OUTPUT"
-          import os, re, json
+          import os, re, json, base64
           body = os.environ.get('BODY', '')
-          # 优先取 ``` 围栏里的内容。
+          found = valid = 0
+
+          def record(text):
+              global found, valid
+              found += 1
+              try:
+                  json.loads(text)
+                  valid += 1
+              except Exception:
+                  pass
+
+          # 应用「复制分享链接」的统一格式：echoscorer:// + Base64(UTF-8 JSON)，一行一条。
+          # 容忍 URL-safe 字母表与被裁掉的 = 填充，与应用内的解析口径保持一致。
+          for payload in re.findall(r'(?i)echoscorer://([A-Za-z0-9+/=_-]+)', body):
+              body64 = payload.replace('-', '+').replace('_', '/')
+              body64 += '=' * (-len(body64) % 4)
+              try:
+                  record(base64.b64decode(body64, validate=True).decode('utf-8'))
+              except Exception:
+                  found += 1  # 链接残缺或不是 Base64，也算一条待修正的内容
+
+          # 也接受直接粘贴的 JSON；优先取 ``` 围栏里的内容。
           blocks = re.findall(r'```[a-zA-Z]*\s*(.*?)```', body, re.S)
           if not blocks:
               # 没有围栏时，只把「行首就是 {」的段落当候选，避免把说明文字里
               # 随手写的 {大概 2.15} 误判成一份非法的 JSON。
               m = re.search(r'(?m)^\s*\{', body)
               blocks = [body[m.start():]] if m else []
-          found = valid = 0
           for b in blocks:
               start = b.find('{')
               if start < 0:
@@ -120,12 +153,7 @@ jobs:
                           cand = b[start:i + 1]
                           # JSON 的键必然带双引号；没有引号就不是一开始找的东西。
                           if '"' in cand:
-                              found += 1
-                              try:
-                                  json.loads(cand)
-                                  valid += 1
-                              except Exception:
-                                  pass
+                              record(cand)
                           break
           status = 'valid' if valid else ('invalid' if found else 'none')
           print(f'found={found}')
@@ -141,10 +169,12 @@ jobs:
         run: |
           gh issue edit "$ISSUE" --add-label invalid-preset
           gh issue comment "$ISSUE" --body "$(cat <<'EOF'
-          ### 粘贴的 JSON 无法解析
+          ### 粘贴的内容无法解析
 
-          机器人没能把内容读成合法 JSON。请用应用「导出为 JSON」生成的原始内容整段粘贴
-          （建议包在三枚反引号的代码块里），或直接把 `.json` 文件拖进 Issue 作为附件上传。
-          本检查**只验证 JSON 格式是否合法**，不涉及系数取值，最终权重由维护者人工审阅。
+          机器人没能把内容读成合法数据。请在应用「编辑角色系数」页点配置右侧的
+          `⋮` →「**复制分享链接**」，把得到的整行 `echoscorer://…` 原样粘贴进来
+          （多份配置一行一条，建议包在三枚反引号的代码块里）；直接粘贴整段 JSON 也可以。
+          请**不要手工改写**链接或 JSON 的外层结构。
+          本检查**只验证格式是否合法**，不涉及系数取值，最终权重由维护者人工审阅。
           EOF
           )"
