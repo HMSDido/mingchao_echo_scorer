@@ -16,7 +16,7 @@ class AppConstants {
       '$repositoryUrl/tree/main/${Uri.encodeComponent(sharedProfilesFolder)}';
 
   /// 与 pubspec.yaml 的 `version` 保持一致。
-  static const String version = '1.0.1+2';
+  static const String version = '1.0.2+3';
 
   /// 窄屏断点：小于该宽度时导航栏与文件栏收进抽屉。
   static const double compactWidthBreakpoint = 900;

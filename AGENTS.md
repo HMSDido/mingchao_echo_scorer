@@ -150,7 +150,7 @@ Android specifics (`android/app/build.gradle.kts`, `android/settings.gradle.kts`
   keep-rules in `android/app/proguard-rules.pro`; there is no device here to
   runtime-verify a minified release, so treat a release-only crash as an
   R8 suspect first.
-- App version lives in `pubspec.yaml` (`version: 1.0.1+2`) and is mirrored by
+- App version lives in `pubspec.yaml` (`version: 1.0.2+3`) and is mirrored by
   `AppConstants.version`; keep the two in sync.
 
 Windows specifics: `main.dart` calls `windowManager.setPreventClose(true)` so

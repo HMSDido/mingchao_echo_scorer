@@ -6,7 +6,7 @@
 
 不联网、不登录、无广告、无统计上报，所有数据以 JSON 形式保存在本地。
 
-- 版本：`1.0.1+2`
+- 版本：`1.0.2+3`
 - 技术栈：Flutter 3.47 / Dart 3.13
 - 仓库：<https://github.com/HMSDido/mingchao_echo_scorer>
 
