@@ -3,11 +3,11 @@
 /// 采用「位置模型」：分组归属与顺序完全由序列中相邻的组标题与条目位置表达，
 /// 数据模型本身不带分组字段；布局只持久化到 prefs，是本地界面偏好，
 /// 不随分享链接导出，也不会把文件弄脏。
-typedef _Node = ({bool isGroup, String value});
+typedef LayoutNode = ({bool isGroup, String value});
 
-_Node _group(String name) => (isGroup: true, value: name);
+LayoutNode _group(String name) => (isGroup: true, value: name);
 
-_Node _item(String id) => (isGroup: false, value: id);
+LayoutNode _item(String id) => (isGroup: false, value: id);
 
 class LibraryLayout {
   LibraryLayout({required this.idPrefix, List<String> tokens = const []})
@@ -32,7 +32,7 @@ class LibraryLayout {
   /// 条目 id 的前缀（如 `p:` / `s:`），把两个命名空间和组标题区分开。
   final String idPrefix;
 
-  final List<_Node> _nodes;
+  final List<LayoutNode> _nodes;
 
   /// 与布局行一一对应的序列化 token 序列，直接写入 prefs。
   List<String> get tokens => [
@@ -122,40 +122,55 @@ class LibraryLayout {
 
   // ---------------------------------------------------------------- 重排
 
-  /// 按 [ReorderableListView] 的 `(oldIndex, newIndex)` 语义重排扁平行。
+  /// 按 [ReorderableListView.onReorderItem] 的索引语义重排扁平行：
+  /// [insertIndex] 已是「移除被拖行之后」列表中的落点下标。
   ///
-  /// 拖动组标题整组（标题 + 成员）一起移动；落点仍在原组内部时不生效。
-  void moveNode(int oldIndex, int newIndex) {
-    var target = newIndex;
-    if (oldIndex < target) target -= 1;
-    if (target == oldIndex) return;
+  /// 拖动组标题时整组（标题 + 成员）一起移动；落点仍在原组范围内不生效。
+  void moveNode(int oldIndex, int insertIndex) {
     if (!rowIsGroup(oldIndex)) {
-      _nodes.insert(target, _nodes.removeAt(oldIndex));
+      if (insertIndex == oldIndex) return;
+      _nodes.insert(insertIndex, _nodes.removeAt(oldIndex));
       return;
     }
     final end = _groupEnd(oldIndex);
-    if (target > oldIndex && target < end) return;
+    if (insertIndex >= oldIndex && insertIndex <= end - 1) return;
     final block = _nodes.sublist(oldIndex, end);
     _nodes.removeRange(oldIndex, end);
-    final insertAt = target > oldIndex ? target - (block.length - 1) : target;
+    final insertAt = insertIndex < oldIndex
+        ? insertIndex
+        : insertIndex - block.length + 1;
     _nodes.insertAll(insertAt, block);
   }
 
   /// 与当前存在的条目对账：布局里已不存在的条目丢弃；
   /// 布局未覆盖的新条目按 [liveIds] 给出的顺序追加到根层末尾。
   void mergeWith(List<String> liveIds) {
+    final merged = viewWith(liveIds);
+    _nodes
+      ..clear()
+      ..addAll(merged);
+  }
+
+  /// 展示用的布局行（不改动布局本身）：丢弃已不存在的条目，
+  /// 布局尚未覆盖的新条目按 [liveIds] 顺序补到根层末尾。
+  List<LayoutNode> viewWith(List<String> liveIds) {
     final live = liveIds.toSet();
-    _nodes.removeWhere((node) => !node.isGroup && !live.contains(node.value));
-    final known = _nodes
-        .where((node) => !node.isGroup)
-        .map((node) => node.value)
-        .toSet();
+    final view = [
+      for (final node in _nodes)
+        if (node.isGroup || live.contains(node.value)) node,
+    ];
+    final known = {
+      for (final node in view)
+        if (!node.isGroup) node.value,
+    };
     final missing = [
       for (final id in liveIds)
         if (!known.contains(id)) _item(id),
     ];
-    if (missing.isEmpty) return;
-    _nodes.insertAll(_rootInsertIndex, missing);
+    if (missing.isEmpty) return view;
+    final first = view.indexWhere((node) => node.isGroup);
+    view.insertAll(first < 0 ? view.length : first, missing);
+    return view;
   }
 
   // ---------------------------------------------------------------- 内部

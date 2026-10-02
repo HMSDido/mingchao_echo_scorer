@@ -97,10 +97,10 @@ void main() {
     });
   });
 
-  group('拖拽重排 moveNode', () {
-    test('条目移动到后面的位置（ReorderableListView 原始下标语义）', () {
+  group('拖拽重排 moveNode（onReorderItem 移除后下标语义）', () {
+    test('条目移动到后面的位置', () {
       final layout = build(['p:a', 'p:b', 'p:c']);
-      layout.moveNode(0, 2);
+      layout.moveNode(0, 1); // 移除 a 后落在 b、c 之间
       expect(layout.tokens, ['p:b', 'p:a', 'p:c']);
     });
 
@@ -112,7 +112,7 @@ void main() {
 
     test('条目可以拖进组和拖出组', () {
       final layout = build(['p:a', 'g:甲', 'p:b']);
-      layout.moveNode(0, 3); // 拖过末尾：进入组内并落到最后
+      layout.moveNode(0, 2); // 拖到末尾：进入组内并落到最后
       expect(layout.tokens, ['g:甲', 'p:b', 'p:a']);
       layout.moveNode(2, 0); // 拖到最前：回到根层
       expect(layout.tokens, ['p:a', 'g:甲', 'p:b']);
@@ -120,23 +120,23 @@ void main() {
 
     test('拖动组标题时整组移动', () {
       final layout = build(['g:甲', 'p:a', 'p:b', 'g:乙', 'p:c']);
-      // 把「甲」组拖到「乙」之前：甲本来就在前面，落点在自身范围内 → 无操作
-      layout.moveNode(0, 3);
+      // 把「甲」组标题拖到「乙」上：落点在自身组范围内 → 无操作
+      layout.moveNode(0, 2);
       expect(layout.tokens, ['g:甲', 'p:a', 'p:b', 'g:乙', 'p:c']);
-      // 把「乙」组拖到「甲」标题上：整组提到最前
+      // 把「乙」组拖到最前：整组（标题+成员）一起移动
       layout.moveNode(3, 0);
       expect(layout.tokens, ['g:乙', 'p:c', 'g:甲', 'p:a', 'p:b']);
     });
 
     test('整组向后移动时成员跟随', () {
       final layout = build(['g:甲', 'p:a', 'g:乙', 'p:b', 'g:丙']);
-      layout.moveNode(0, 4);
+      layout.moveNode(0, 3); // 拖到「丙」上
       expect(layout.tokens, ['g:乙', 'p:b', 'g:甲', 'p:a', 'g:丙']);
     });
 
     test('落点在自身组内部不生效', () {
       final layout = build(['g:甲', 'p:a', 'p:b']);
-      layout.moveNode(0, 2);
+      layout.moveNode(0, 1);
       expect(layout.tokens, ['g:甲', 'p:a', 'p:b']);
     });
 
