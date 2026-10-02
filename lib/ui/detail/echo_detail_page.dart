@@ -63,6 +63,10 @@ class _EchoDetailPageState extends State<EchoDetailPage> {
   void _setTier(SubstatType type, int tier) =>
       setState(() => _draft = _draft.withTier(type, tier));
 
+  /// 一键把全部副词条档位清 0（保留名称与目标分）。
+  void _clearAllTiers() =>
+      setState(() => _draft = _draft.copyWith(tiers: const {}));
+
   void _onTargetChanged(String raw) {
     final parsed = double.tryParse(raw.trim());
     setState(() {
@@ -201,6 +205,11 @@ class _EchoDetailPageState extends State<EchoDetailPage> {
                   tooltip: '重命名声骸',
                   icon: const Icon(Icons.edit_outlined),
                   onPressed: _rename,
+                ),
+                IconButton(
+                  tooltip: '全词条置 0',
+                  icon: const Icon(Icons.clear_all),
+                  onPressed: _draft.filledCount == 0 ? null : _clearAllTiers,
                 ),
                 if (wide)
                   TextButton.icon(

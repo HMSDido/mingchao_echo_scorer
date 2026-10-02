@@ -246,6 +246,49 @@ void main() {
     expect(find.textContaining('已选 1/5'), findsOneWidget);
   });
 
+  testWidgets('详情页「全词条置 0」一键清空该声骸全部档位', (tester) async {
+    final harness = await _pumpApp(tester);
+    final file = await _seedScoredFile(tester);
+    harness.workspace.updateEcho(
+      file.id,
+      file
+          .echoAt(0)
+          .withTier(SubstatType.critRate, 3)
+          .withTier(SubstatType.critDmg, 2),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(EchoCard).first);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('已选 2/5'), findsOneWidget);
+    expect(_plainText(tester, 'current-score'), isNot(startsWith('0.00')));
+
+    await tester.tap(find.byTooltip('全词条置 0'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('已选 0/5'), findsOneWidget);
+    expect(find.textContaining('已选词条'), findsNothing);
+    expect(_plainText(tester, 'current-score'), '0.00分 无评级');
+    // 没有档位可清后，按钮置灰。
+    expect(
+      tester
+          .widget<IconButton>(
+            find.ancestor(
+              of: find.byIcon(Icons.clear_all),
+              matching: find.byType(IconButton),
+            ),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    // 置 0 算内容改动：写回草稿后该声骸档位为空。
+    await tester.tap(find.widgetWithText(FilledButton, '保存本声骸'));
+    await tester.pumpAndSettle();
+    expect(harness.workspace.byId(file.id)!.echoAt(0).tiers, isEmpty);
+    await _dismissSnackBars(tester);
+  });
+
   testWidgets('窄屏详情页渲染词条行，点档位标签即可输入', (tester) async {
     await _pumpApp(tester);
     await _seedScoredFile(tester);
