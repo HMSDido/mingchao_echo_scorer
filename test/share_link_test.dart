@@ -41,15 +41,17 @@ void main() {
       );
 
   group('编码', () {
-    test('分享链接是 echoscorer:// + Base64，不暴露配置明文', () {
-      final link = ProfileShare.encode(sampleProfile('abc123', '长离'));
+    test('复制文本首行带 # 名字说明头，链接本体不暴露明文', () {
+      final text = ProfileShare.encode(sampleProfile('abc123', '长离'));
+      final lines = text.split('\n');
 
-      expect(link, startsWith(ShareLink.scheme));
-      expect(link, isNot(contains('长离')));
-      expect(link, isNot(contains('{')));
+      expect(lines.first, '# 长离系数配置');
+      expect(lines[1], startsWith(ShareLink.scheme));
+      expect(lines[1], isNot(contains('长离')));
+      expect(text, isNot(contains('{')));
     });
 
-    test('多条配置按行拼接，每行都是完整链接', () {
+    test('多条配置各带各的说明头，链接一行一条', () {
       final text = ProfileShare.encodeAll([
         sampleProfile('a1', '长离'),
         sampleProfile('b2', '守岸人'),
@@ -57,16 +59,25 @@ void main() {
       ]);
 
       final lines = text.split('\n');
-      expect(lines, hasLength(3));
-      expect(lines.every((line) => line.startsWith(ShareLink.scheme)), isTrue);
+      expect(lines, hasLength(6));
+      expect(lines.where((line) => line.startsWith(ShareLink.commentPrefix)), [
+        '# 长离系数配置',
+        '# 守岸人系数配置',
+        '# 卡卡罗系数配置',
+      ]);
+      expect(
+        lines.where((line) => !line.startsWith(ShareLink.commentPrefix)),
+        hasLength(3),
+      );
     });
 
-    test('评分文件同样走分享链接编码', () {
-      final link = ScoreShare.encode(sampleScore('f1', '长离毕业套'));
+    test('评分文件同样走分享链接编码并带说明头', () {
+      final text = ScoreShare.encode(sampleScore('f1', '长离毕业套'));
+      final lines = text.split('\n');
 
-      expect(link, startsWith(ShareLink.scheme));
-      expect(link, isNot(contains('长离毕业套')));
-      expect(link, isNot(contains('哀声鸷')));
+      expect(lines.first, '# 长离毕业套评分文件');
+      expect(lines[1], startsWith(ShareLink.scheme));
+      expect(text, isNot(contains('哀声鸷')));
     });
   });
 
@@ -115,13 +126,40 @@ void main() {
 
       expect(result.items.map((profile) => profile.id), ['a1', 'a1']);
       expect(result.failures, hasLength(2));
-      expect(result.failures[0], startsWith('第 2 行'));
-      expect(result.failures[1], startsWith('第 3 行'));
+      expect(result.failures[0], startsWith('第 3 行'));
+      expect(result.failures[1], startsWith('第 4 行'));
+    });
+
+    test('# 说明行整行跳过，不计入失败', () {
+      final link = ProfileShare.encode(sampleProfile('a1', '长离'));
+
+      final result = ProfileShare.parse('# 随手写的备注\n$link');
+
+      expect(result.failures, isEmpty);
+      expect(result.items.single.id, 'a1');
+    });
+
+    test('全是说明行时返回空结果，不算失败', () {
+      final result = ProfileShare.parse('# 头部\n# 尾部');
+
+      expect(result.items, isEmpty);
+      expect(result.failures, isEmpty);
+    });
+
+    test('说明头 + 整段美化 JSON 也能一起导入', () {
+      final pretty = const JsonEncoder.withIndent('  ')
+          .convert(sampleProfile('a1', '长离').toJson());
+
+      final result = ProfileShare.parse('# 长离系数配置\n$pretty');
+
+      expect(result.failures, isEmpty);
+      expect(result.items.single.id, 'a1');
     });
 
     test('前缀大小写不敏感，CRLF 换行也能拆', () {
       final link = ProfileShare.encode(sampleProfile('a1', '长离'));
-      final upper = 'ECHOSCORER://${link.substring(ShareLink.scheme.length)}';
+      final bare = ShareLink.encode(sampleProfile('a1', '长离').toJson());
+      final upper = 'ECHOSCORER://${bare.substring(ShareLink.scheme.length)}';
 
       final result = ProfileShare.parse('$upper\r\n$link');
 

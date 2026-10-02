@@ -502,14 +502,23 @@ void main() {
     expect(find.text('已复制 3 个配置到剪贴板'), findsOneWidget);
     await _dismissSnackBars(tester);
 
-    // 剪贴板里是三行分享链接，配置内容不以明文出现。
+    // 剪贴板里是「说明头 + 链接」成对的多行文本，配置内容不以明文出现。
     final clipboard = await harness.runAsync(
       () => Clipboard.getData(Clipboard.kTextPlain),
     );
     final lines = clipboard!.text!.split('\n');
-    expect(lines, hasLength(3));
-    expect(lines.every((line) => line.startsWith('echoscorer://')), isTrue);
-    expect(clipboard.text, isNot(contains('守岸人')));
+    expect(lines, hasLength(6));
+    expect(
+      lines.where((line) => line.startsWith('#')),
+      containsAll(['# 01长离系数配置', '# 21守岸人系数配置', '# 卡卡罗系数配置']),
+    );
+    expect(
+      lines
+          .where((line) => !line.startsWith('#'))
+          .every((line) => line.startsWith('echoscorer://')),
+      isTrue,
+    );
+    expect(clipboard.text, isNot(contains('"coefficients"')));
 
     // 清空列表，模拟换到一台没有任何配置的设备。
     await harness.runAsync(() async {
@@ -549,7 +558,7 @@ void main() {
     await _settleUntil(tester, () => harness.profiles.profiles.length == 2);
 
     expect(find.text('成功导入 1 个配置，跳过 1 行无效数据'), findsOneWidget);
-    expect(find.textContaining('第 2 行'), findsOneWidget);
+    expect(find.textContaining('第 3 行'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, '知道了'));
     await tester.pumpAndSettle();
     expect(find.text('长离'), findsWidgets);
@@ -579,8 +588,8 @@ void main() {
     final clipboard = await harness.runAsync(
       () => Clipboard.getData(Clipboard.kTextPlain),
     );
-    expect(clipboard!.text, startsWith('echoscorer://'));
-    expect(clipboard.text, isNot(contains('长离-主C')));
+    expect(clipboard!.text, startsWith('# 长离-主C评分文件\nechoscorer://'));
+    expect(clipboard.text, isNot(contains('"echoes"')));
 
     // 删掉本地文件，模拟换到一台什么都没有的设备。
     await harness.runAsync(
@@ -625,14 +634,23 @@ void main() {
     expect(find.text('已复制 2 个评分文件的分享链接'), findsOneWidget);
     await _dismissSnackBars(tester);
 
-    // 剪贴板里是两行分享链接，文件名不以明文出现。
+    // 剪贴板里是「说明头 + 链接」成对的多行文本，文件名出现在说明头里。
     final clipboard = await harness.runAsync(
       () => Clipboard.getData(Clipboard.kTextPlain),
     );
     final lines = clipboard!.text!.split('\n');
-    expect(lines, hasLength(2));
-    expect(lines.every((line) => line.startsWith('echoscorer://')), isTrue);
-    expect(clipboard.text, isNot(contains('甲文件')));
+    expect(lines, hasLength(4));
+    expect(
+      lines.where((line) => line.startsWith('#')),
+      containsAll(['# 甲文件评分文件', '# 乙文件评分文件']),
+    );
+    expect(
+      lines
+          .where((line) => !line.startsWith('#'))
+          .every((line) => line.startsWith('echoscorer://')),
+      isTrue,
+    );
+    expect(clipboard.text, isNot(contains('"echoes"')));
 
     // 删掉全部文件（含磁盘），模拟换到一台什么都没有的设备后整批导入。
     await harness.runAsync(() async {

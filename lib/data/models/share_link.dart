@@ -7,39 +7,53 @@ import 'score_file.dart';
 ///
 /// Base64 让中文和引号不会在粘贴、聊天软件转义时损坏，也避免把内容直接摊在
 /// 链接里。纯 Dart、不依赖 Flutter，方便单元测试。
+///
+/// 约定：trim 后以 `#` 开头的行是给人看的说明行（如 `# 31绯雪系数配置`），
+/// 解析时与空行一样直接跳过，不计入失败。
 class ShareLink {
   const ShareLink._();
 
   static const String scheme = 'echoscorer://';
 
-  static String encode(Map<String, dynamic> json) =>
-      '$scheme${base64Encode(utf8.encode(jsonEncode(json)))}';
+  /// 注释行前缀：只给人看，程序整行跳过。
+  static const String commentPrefix = '#';
 
-  static String encodeAll(Iterable<Map<String, dynamic>> items) =>
-      items.map(encode).join('\n');
+  static String encode(Map<String, dynamic> json, {String? comment}) {
+    final link = '$scheme${base64Encode(utf8.encode(jsonEncode(json)))}';
+    final note = comment?.trim();
+    return note == null || note.isEmpty ? link : '$commentPrefix $note\n$link';
+  }
 
   /// 解析剪贴板文本。
   ///
-  /// 先整体试一次 JSON——社区仓库里分享的配置是多行美化 JSON，整段粘贴进来
-  /// 也要能读；再按行拆分逐条解析，坏行只记进 [ShareLinkResult.failures]，
-  /// 不影响同批的其他条目。空行直接跳过，不算失败。
+  /// `#` 说明行与空行一律跳过（不算失败）；先整体试一次 JSON——社区仓库里
+  /// 分享的配置是多行美化 JSON，整段粘贴进来也要能读；再按行拆分逐条解析，
+  /// 坏行只记进 [ShareLinkResult.failures]，不影响同批的其他条目。
   static ShareLinkResult<T> parse<T>(String raw, ShareDecoder<T> decode) {
     final text = raw.trim();
     if (text.isEmpty) {
       return ShareLinkResult(items: const [], failures: const []);
     }
 
-    final whole = _decodeOrNull(text, decode);
+    final lines = text.split(RegExp(r'\r?\n'));
+    final body = lines
+        .where((line) => !line.trim().startsWith(commentPrefix))
+        .join('\n')
+        .trim();
+    if (body.isEmpty) {
+      return ShareLinkResult(items: const [], failures: const []);
+    }
+
+    final whole = _decodeOrNull(body, decode);
     if (whole != null) {
       return ShareLinkResult(items: [whole], failures: const []);
     }
 
     final items = <T>[];
     final failures = <String>[];
-    final lines = text.split(RegExp(r'\r?\n'));
     for (var index = 0; index < lines.length; index++) {
       final line = lines[index].trim();
-      if (line.isEmpty) continue;
+      if (line.isEmpty || line.startsWith(commentPrefix)) continue;
       try {
         items.add(_decode(line, decode));
       } on FormatException catch (error) {
@@ -109,11 +123,12 @@ typedef ShareImportSummary = ({int imported, List<String> failures});
 class ProfileShare {
   const ProfileShare._();
 
+  /// 单条编码自带人读说明头，如 `# 31绯雪系数配置`。
   static String encode(CoefficientProfile profile) =>
-      ShareLink.encode(profile.toJson());
+      ShareLink.encode(profile.toJson(), comment: '${profile.name}系数配置');
 
   static String encodeAll(Iterable<CoefficientProfile> profiles) =>
-      ShareLink.encodeAll(profiles.map((profile) => profile.toJson()));
+      profiles.map(encode).join('\n');
 
   static ShareLinkResult<CoefficientProfile> parse(String raw) =>
       ShareLink.parse(raw, _decode);
@@ -130,10 +145,12 @@ class ProfileShare {
 class ScoreShare {
   const ScoreShare._();
 
-  static String encode(ScoreFile file) => ShareLink.encode(file.toJson());
+  /// 单条编码自带人读说明头，如 `# 长离毕业套评分文件`。
+  static String encode(ScoreFile file) =>
+      ShareLink.encode(file.toJson(), comment: '${file.name}评分文件');
 
   static String encodeAll(Iterable<ScoreFile> files) =>
-      ShareLink.encodeAll(files.map((file) => file.toJson()));
+      files.map(encode).join('\n');
 
   static ShareLinkResult<ScoreFile> parse(String raw) =>
       ShareLink.parse(raw, _decode);
